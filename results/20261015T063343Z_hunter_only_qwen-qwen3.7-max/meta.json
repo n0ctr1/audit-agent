@@ -1,0 +1,168 @@
+{
+  "created_at": "2026-10-15T06:33:43.572990+00:00",
+  "dataset": {
+    "ref": "<BENCHMARK_CONTESTS_DIR>/contests.json",
+    "path": "<BENCHMARK_CONTESTS_DIR>/contests.json",
+    "sha256": "bff6b5cc4f37a57342a2bdb8529a993230c29dc2fbcfcdbe5d1c9140d46d1d77"
+  },
+  "selection": {
+    "split": "test",
+    "contests": [
+      "c4-2025-10-sequence"
+    ],
+    "after_date": null,
+    "include_needs_review": true
+  },
+  "runs": 1,
+  "preset": {
+    "name": "hunter_only",
+    "env": {
+      "THREAT_MODEL_ENABLED": "true",
+      "HUNTER_EXPERTS_ENABLED": "true",
+      "HUNTER_STANDALONE_PASSES_ENABLED": "true",
+      "EXPLOIT_ENABLED": "false",
+      "SKEPTIC_ENABLED": "false",
+      "REFUTER_ENABLED": "false"
+    }
+  },
+  "fuzz": true,
+  "git": {
+    "commit": "7045a7b034dc6440515b622aa42dec092b9e4b5f",
+    "dirty": false
+  },
+  "python": "3.12.14",
+  "models": {
+    "scout": "qwen/qwen3.7-max",
+    "mapper": "qwen/qwen3.7-max",
+    "hunter": "qwen/qwen3.7-max",
+    "exploit": "qwen/qwen3.7-max",
+    "skeptic": "qwen/qwen3.7-max",
+    "scribe": "qwen/qwen3.7-max",
+    "baseline": "qwen/qwen3.7-max",
+    "triage": "qwen/qwen3.7-max"
+  },
+  "flags": {
+    "HUNTER_NAVIGATOR_ENABLED": true,
+    "HUNTER_EXPERTS_ENABLED": true,
+    "HUNTER_STANDALONE_PASSES_ENABLED": true,
+    "EXPLOIT_ENABLED": false,
+    "SKEPTIC_ENABLED": false,
+    "INVARIANT_PROVER_ENABLED": true,
+    "REFUTER_ENABLED": false,
+    "CHAINER_ENABLED": true,
+    "THREAT_MODEL_ENABLED": true,
+    "TRIAGE_ENABLED": true,
+    "ADERYN_ENABLED": true,
+    "SEMGREP_ENABLED": true,
+    "AUDIT_LOG_ENABLED": true
+  },
+  "settings": {
+    "llm_provider": "openai_compatible",
+    "llm_disable_thinking": false,
+    "llm_reasoning_max_tokens": 2048,
+    "llm_min_output_tokens": 32768,
+    "tool_mode": "strict",
+    "hunter_max_concurrency": 3,
+    "hunter_top_functions": 8,
+    "hunter_max_hypotheses": 40,
+    "hunter_source_budget_chars": 80000,
+    "hunter_context_budget_chars": 40000,
+    "hunter_navigator_leads": 2,
+    "hunter_navigator_max_steps": 6,
+    "chainer_max_chains": 6,
+    "hunter_threat_boost": 15.0,
+    "triage_batch_size": 25,
+    "triage_weight": 20.0,
+    "default_budget_tokens": 500000,
+    "default_budget_usd": 50.0,
+    "baseline_max_tokens": 2000000,
+    "baseline_max_seconds": 5400,
+    "baseline_max_steps": 150,
+    "baseline_command_timeout": 120
+  },
+  "contests": [
+    {
+      "id": "c4-2025-10-sequence",
+      "name": "Code4rena 2025-10 Sequence",
+      "source_dir": "work/2025-10-sequence",
+      "scope_file": "scope.txt",
+      "docs_dir": null,
+      "split": "test",
+      "contest_end_date": "2025-10-22",
+      "contaminated": false,
+      "gt_source": "https://code4rena.com/reports/2025-10-sequence",
+      "gt_note": null,
+      "needs_review": true,
+      "known_issues": [],
+      "official_findings": [
+        {
+          "id": "H-01",
+          "title": "Chained signature with checkpoint usage disabled can bypass all checkpointer validation",
+          "severity": "high",
+          "vulnerability_class": "signature-replay",
+          "affected_functions": [
+            "BaseSig.recover"
+          ],
+          "description": "Submitted by hgrano Finding description and impact Consider a scenario where (1) the wallet is behind the checkpointer and (2) a chained signature is used; however, bit 6 (0x40 - the checkpointer usage flag) is zero. As a result, when BaseSig.recover is called the below if-block on BaseSig.sol:88-106 will be skipped: We can see that this will leave the following variables unset (zero-valued): - _checkpointer - snapshot.checkpoint - snapshot.imageHash We then enter recoverChained with the above unset variables passed in: Let\u2019s assume the signature chain contains one signature. Therefore, in the first loop iteration above nrindex == _signature.length and address checkpointer is set to _checkpointer = address(0). We then enter recover again - this time with _ignoreCheckpointer == true and _ch"
+        },
+        {
+          "id": "H-02",
+          "title": "Partial signature replay/frontrunning attack on session calls",
+          "severity": "high",
+          "vulnerability_class": "front-running/signature-replay",
+          "affected_functions": [
+            "Calls.execute",
+            "Calls._execute",
+            "SessionSig.recoverSignature"
+          ],
+          "description": "Submitted by montecristo When a session call with BEHAVIOR_REVERT_ON_ERROR behavior fails, the entire execution reverts but the signature remains valid, since nonce is not yet consumed. Attackers can forge a valid partial signature from failed multi-call session, executing partial calls that were never intended to run independently. Moreover, if an attacker has access to mempool, they can frontrun a multi-call session to execute only a subset of calls to either grief the legitimate call, or inflict financial damage to the wallet owners. Finding description and impact The Calls contract consumes nonces before signature validation and execution: File: src/modules/Calls.sol : When a call fails with BEHAVIOR_REVERT_ON_ERROR, the entire transaction reverts, including nonce consumption: File: sr"
+        },
+        {
+          "id": "M-01",
+          "title": "Session signatures replay across wallets due to missing wallet binding",
+          "severity": "medium",
+          "vulnerability_class": "signature-replay",
+          "affected_functions": [
+            "SessionSig.hashCallWithReplayProtection",
+            "SessionManager.recoverSapientSignature",
+            "BaseAuth.signatureValidation",
+            "Stage2Auth._isValidImage",
+            "Stage2Auth._updateImageHash"
+          ],
+          "description": "Submitted by Manosh19, also found by 0xvd, Audittens, ChainSentry, deeney, ELITE-, HalfBloodPrince, hassan-truscova, ixam, johnyfwesh, K42, Legend, valarislife, and Ziusz Finding description and impact Sequence wallets rely on SessionSig.hashCallWithReplayProtection to derive the message hashed by session signers. The function only hashes (chainId, nonce space, nonce, call index, call encoding) and omits the wallet address (src/extensions/sessions/SessionSig.sol:406). When a session signer signs a payload for one wallet, the resulting signature can be reused against any other wallet that (a) shares the same configuration image hash and (b) has the same nonce in that space because: - SessionManager.recoverSapientSignature validates session signatures but never incorporates msg.sender into t"
+        },
+        {
+          "id": "M-02",
+          "title": "Static signatures bound to caller revert under ERC-4337, causing DoS",
+          "severity": "medium",
+          "vulnerability_class": "dos/signature-replay",
+          "affected_functions": [
+            "ERC4337v07.validateUserOp",
+            "BaseAuth.signatureValidation"
+          ],
+          "description": "Submitted by Agontuk, also found by 0xnija and zcai Finding description Sequence wallets support ERC\u20114337 by validating signatures inside validateUserOp() in ERC4337v07 . The function enforces that msg.sender is the entrypoint and then performs signature verification via an external self\u2011call: this.isValidSignature(userOpHash, userOp.signature). Because of this external call, the msg.sender observed inside isValidSignature() (implemented in BaseAuth) becomes the wallet itself, not the entrypoint. As a result, the static signature validation in BaseAuth.signatureValidation()\u2014which enforces a caller binding\u2014fails whenever a non\u2011zero \u201cexpected caller\u201d is set to the entrypoint. In particular, BaseAuth.signatureValidation() checks the static signature\u2019s bound caller using: \u201cmsg.sender inside is"
+        },
+        {
+          "id": "M-03",
+          "title": "BaseAuth.recoverSapientSignature returns a constant instead of signer image hash, breaking sapient signer flows",
+          "severity": "medium",
+          "vulnerability_class": "unclassified",
+          "affected_functions": [
+            "BaseAuth.recoverSapientSignature"
+          ],
+          "description": "Submitted by Agontuk, also found by 0xnija, axelot, francoHacker, and Nora Finding Description BaseAuth.recoverSapientSignature() violates the ISapient interface contract by returning a constant value instead of the signer\u2019s imageHash. The ISapient interface specifies that sapient signers \u201creturn their own imageHash\u201d for the provided payload and signature via recoverSapientSignature(...). However, the implementation in BaseAuth.recoverSapientSignature() unconditionally returns bytes32(uint256(1)). Walkthrough and root cause: - BaseAuth.recoverSapientSignature(): - Mutates _payload.parentWallets by appending msg.sender. - Calls signatureValidation(...) to validate the signature. - On success, it returns bytes32(uint256(1)) rather than the actual sapient signer image hash. - ISapient.recover"
+        },
+        {
+          "id": "M-04",
+          "title": "Factory deploy reverts instead of returning address when account already exists",
+          "severity": "medium",
+          "vulnerability_class": "unclassified",
+          "affected_functions": [
+            "Factory.deploy"
+          ],
+          "description": "Submitted by pfapostol Finding description The Factory.deploy function uses create2 to deploy a wallet but reverts (CreateCollision) if address already exists. Per ERC-4337, factories that use deterministic creation must return the account address even if the account was already created (eip-4337) so bundlers and entryPoint.getSenderAddress() can simulate/obtain the counterfactual address without failing. The current implementation breaks that invariant: calling the factory when the account already exists will revert instead of returning the existing address, which can break ERC-4337 flows (simulations, getSenderAddress, bundler logic, UX). If the factory does use CREATE2 0xF5 or some other deterministic method to create the Account, it\u2019s expected to return the Account address even if it h"
+        }
+      ]
+    }
+  ]
+}

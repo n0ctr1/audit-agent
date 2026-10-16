@@ -1,0 +1,367 @@
+{
+  "generated_at": "2026-10-15T21:38:59.776808+00:00",
+  "gt_origin": "<BENCHMARK_CONTESTS_DIR>/contests.json",
+  "matcher": {
+    "rule": "function_match AND (class_compatible OR title_jaccard >= min)",
+    "title_jaccard_min": 0.2,
+    "rank_weights": {
+      "function": 0.4,
+      "class": 0.4,
+      "title": 0.2
+    }
+  },
+  "unlabelled_unmatched_findings": 0,
+  "unreviewed_label_rows": 0,
+  "runs": [
+    {
+      "contest_id": "c4-2026-04-monetrix",
+      "run_index": 0,
+      "status": "ok",
+      "error": null,
+      "num_ground_truth": 1,
+      "num_hypotheses": 23,
+      "num_final_findings": 23,
+      "num_validated": 0,
+      "recall_hypotheses_at_30": 0.0,
+      "recall_hypotheses_all": 0.0,
+      "recall_final": 0.0,
+      "recall_validated": 0.0,
+      "hypothesis_matches": [],
+      "final_matches": [],
+      "validated_matches": [],
+      "validator_loss_count": 0,
+      "validator_loss": [],
+      "pipeline_loss_count": 0,
+      "pipeline_loss": [],
+      "precision_gt": null,
+      "num_validated_matched": 0,
+      "unmatched_validated_ids": [],
+      "precision_adjusted": {
+        "value": null,
+        "labelled": {
+          "tp_not_in_gt": 0,
+          "fp": 0,
+          "duplicate": 0,
+          "unsure": 0
+        },
+        "unlabelled": 0
+      },
+      "recall_by_severity": {
+        "high": {
+          "num_gt": 0,
+          "recall_hypotheses_at_30": null,
+          "recall_final": null,
+          "recall_validated": null
+        },
+        "medium": {
+          "num_gt": 1,
+          "recall_hypotheses_at_30": 0.0,
+          "recall_final": 0.0,
+          "recall_validated": 0.0
+        }
+      },
+      "exploit_stats": {
+        "counts": {
+          "exploited": 0,
+          "partial": 0,
+          "blocked": 0,
+          "error": 0,
+          "compile_error": 0
+        },
+        "exploited_rate_gt_matched": null,
+        "exploited_rate_gt_unmatched": null,
+        "num_gt_matched": 0,
+        "num_gt_unmatched": 0
+      },
+      "validator_confusion": {
+        "skeptic": {
+          "validated": {
+            "gt_match": 0,
+            "no_gt_match": 0
+          },
+          "unverified": {
+            "gt_match": 0,
+            "no_gt_match": 23
+          },
+          "false_positive": {
+            "gt_match": 0,
+            "no_gt_match": 0
+          },
+          "duplicate": {
+            "gt_match": 0,
+            "no_gt_match": 0
+          }
+        },
+        "final": {
+          "validated": {
+            "gt_match": 0,
+            "no_gt_match": 0
+          },
+          "unverified": {
+            "gt_match": 0,
+            "no_gt_match": 23
+          },
+          "false_positive": {
+            "gt_match": 0,
+            "no_gt_match": 0
+          },
+          "duplicate": {
+            "gt_match": 0,
+            "no_gt_match": 0
+          }
+        }
+      },
+      "cost_usd": 2.144654,
+      "tokens": 601334,
+      "time_s": 931.086,
+      "human_recall_hypotheses": 0.0,
+      "human_recall_final": 0.0,
+      "human_labels": {
+        "file": "labels_c4-2026-04-monetrix_run0.csv",
+        "rows": 23,
+        "unreviewed": 0,
+        "unknown_gt_ids": [],
+        "complete": true,
+        "covered_hypotheses": [],
+        "covered_final": [],
+        "matcher_agreement": {
+          "tp": 0,
+          "fp": 0,
+          "fn": 0,
+          "tn": 23,
+          "precision": null,
+          "recall": null,
+          "accuracy": 1.0,
+          "cohen_kappa": null
+        },
+        "precision_validated": {
+          "value": null,
+          "validated": 0,
+          "matched_gt": 0,
+          "labelled": {
+            "tp_not_in_gt": 0,
+            "fp": 0,
+            "duplicate": 0,
+            "unsure": 0
+          },
+          "unlabelled": 0
+        }
+      }
+    }
+  ],
+  "contests": {
+    "c4-2026-04-monetrix": {
+      "split": "test",
+      "needs_review": false,
+      "contaminated": false,
+      "num_ground_truth": 1,
+      "num_runs": 1,
+      "aggregate": {
+        "human_recall_hypotheses": {
+          "mean": 0.0,
+          "min": 0.0,
+          "max": 0.0,
+          "n": 1
+        },
+        "human_recall_final": {
+          "mean": 0.0,
+          "min": 0.0,
+          "max": 0.0,
+          "n": 1
+        },
+        "recall_hypotheses_at_30": {
+          "mean": 0.0,
+          "min": 0.0,
+          "max": 0.0,
+          "n": 1
+        },
+        "recall_hypotheses_all": {
+          "mean": 0.0,
+          "min": 0.0,
+          "max": 0.0,
+          "n": 1
+        },
+        "recall_final": {
+          "mean": 0.0,
+          "min": 0.0,
+          "max": 0.0,
+          "n": 1
+        },
+        "recall_validated": {
+          "mean": 0.0,
+          "min": 0.0,
+          "max": 0.0,
+          "n": 1
+        },
+        "precision_gt": {
+          "mean": null,
+          "min": null,
+          "max": null,
+          "n": 0
+        },
+        "validator_loss_count": {
+          "mean": 0.0,
+          "min": 0.0,
+          "max": 0.0,
+          "n": 1
+        },
+        "cost_usd": {
+          "mean": 2.144654,
+          "min": 2.144654,
+          "max": 2.144654,
+          "n": 1
+        },
+        "tokens": {
+          "mean": 601334.0,
+          "min": 601334.0,
+          "max": 601334.0,
+          "n": 1
+        },
+        "time_s": {
+          "mean": 931.086,
+          "min": 931.086,
+          "max": 931.086,
+          "n": 1
+        },
+        "precision_adjusted": {
+          "mean": null,
+          "min": null,
+          "max": null,
+          "n": 0
+        }
+      }
+    }
+  },
+  "splits": {
+    "test": {
+      "num_contests": 1,
+      "num_runs_ok": 1,
+      "num_runs_error": 0,
+      "per_run_index": [
+        {
+          "run_index": 0,
+          "num_ok": 1,
+          "num_error": 0,
+          "macro": {
+            "human_recall_hypotheses": 0.0,
+            "human_recall_final": 0.0,
+            "recall_hypotheses_at_30": 0.0,
+            "recall_hypotheses_all": 0.0,
+            "recall_final": 0.0,
+            "recall_validated": 0.0,
+            "precision_gt": null,
+            "validator_loss_count": 0.0,
+            "cost_usd": 2.144654,
+            "tokens": 601334.0,
+            "time_s": 931.086,
+            "precision_adjusted": null
+          },
+          "pooled": {
+            "recall_hypotheses_at_30": 0.0,
+            "recall_final": 0.0,
+            "recall_validated": 0.0
+          },
+          "totals": {
+            "cost_usd": 2.144654,
+            "tokens": 601334,
+            "time_s": 931.086
+          }
+        }
+      ],
+      "summary": {
+        "human_recall_hypotheses": {
+          "mean": 0.0,
+          "min": 0.0,
+          "max": 0.0,
+          "n": 1
+        },
+        "human_recall_final": {
+          "mean": 0.0,
+          "min": 0.0,
+          "max": 0.0,
+          "n": 1
+        },
+        "recall_hypotheses_at_30": {
+          "mean": 0.0,
+          "min": 0.0,
+          "max": 0.0,
+          "n": 1
+        },
+        "recall_hypotheses_all": {
+          "mean": 0.0,
+          "min": 0.0,
+          "max": 0.0,
+          "n": 1
+        },
+        "recall_final": {
+          "mean": 0.0,
+          "min": 0.0,
+          "max": 0.0,
+          "n": 1
+        },
+        "recall_validated": {
+          "mean": 0.0,
+          "min": 0.0,
+          "max": 0.0,
+          "n": 1
+        },
+        "precision_gt": {
+          "mean": null,
+          "min": null,
+          "max": null,
+          "n": 0
+        },
+        "validator_loss_count": {
+          "mean": 0.0,
+          "min": 0.0,
+          "max": 0.0,
+          "n": 1
+        },
+        "cost_usd": {
+          "mean": 2.144654,
+          "min": 2.144654,
+          "max": 2.144654,
+          "n": 1
+        },
+        "tokens": {
+          "mean": 601334.0,
+          "min": 601334.0,
+          "max": 601334.0,
+          "n": 1
+        },
+        "time_s": {
+          "mean": 931.086,
+          "min": 931.086,
+          "max": 931.086,
+          "n": 1
+        },
+        "precision_adjusted": {
+          "mean": null,
+          "min": null,
+          "max": null,
+          "n": 0
+        }
+      },
+      "pooled_summary": {
+        "recall_hypotheses_at_30": {
+          "mean": 0.0,
+          "min": 0.0,
+          "max": 0.0,
+          "n": 1
+        },
+        "recall_final": {
+          "mean": 0.0,
+          "min": 0.0,
+          "max": 0.0,
+          "n": 1
+        },
+        "recall_validated": {
+          "mean": 0.0,
+          "min": 0.0,
+          "max": 0.0,
+          "n": 1
+        }
+      }
+    }
+  }
+}

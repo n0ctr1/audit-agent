@@ -1,0 +1,2 @@
+contest,run,finding_id,hypothesis_id,title,functions,severity,report_path,matcher_status,unmatched_by,label
+c4-2026-04-monetrix,0,4013b046-2f57-4d18-b048-806d560815be,99950637-f116-40bb-930d-0fba16e0f7ab,Same-block USDM minting inflates APR cap in settleDailyPnL allowing excess yield extraction,settleDailyPnL; totalBackingSigned; _readL1Backing,medium,c4-2026-04-monetrix/run_0_reports/4013b046-2f57-4d18-b048-806d560815be.md,unmatched,matcher+human,unsure

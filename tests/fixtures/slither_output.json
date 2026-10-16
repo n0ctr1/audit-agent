@@ -1,0 +1,600 @@
+{
+  "success": true,
+  "slither_version": "0.10.4",
+  "solidity_version": "0.8.20",
+  "target": "tests/fixtures/contracts",
+  "contracts": [
+    {
+      "id": "vulnerablebank",
+      "name": "VulnerableBank",
+      "source_file": "tests/fixtures/contracts/VulnerableBank.sol",
+      "kind": "contract",
+      "compiler_version": "^0.8.20",
+      "is_abstract": false,
+      "inherits": [],
+      "natspec": {
+        "notice": "Intentionally vulnerable ETH bank for testing purposes.",
+        "dev": "KNOWN VULNERABILITIES: reentrancy in withdraw(), no access control on emergencyDrain(), precision loss in calculateShares()"
+      },
+      "state_variables": [
+        {
+          "id": "vulnerablebank.balances",
+          "name": "balances",
+          "type": "mapping(address => uint256)",
+          "visibility": "public",
+          "is_constant": false,
+          "is_immutable": false,
+          "initial_value": ""
+        },
+        {
+          "id": "vulnerablebank.owner",
+          "name": "owner",
+          "type": "address",
+          "visibility": "public",
+          "is_constant": false,
+          "is_immutable": false,
+          "initial_value": ""
+        },
+        {
+          "id": "vulnerablebank.totalShares",
+          "name": "totalShares",
+          "type": "uint256",
+          "visibility": "public",
+          "is_constant": false,
+          "is_immutable": false,
+          "initial_value": ""
+        },
+        {
+          "id": "vulnerablebank.feeRate",
+          "name": "feeRate",
+          "type": "uint256",
+          "visibility": "public",
+          "is_constant": false,
+          "is_immutable": false,
+          "initial_value": "100"
+        },
+        {
+          "id": "vulnerablebank.feesCollected",
+          "name": "feesCollected",
+          "type": "uint256",
+          "visibility": "public",
+          "is_constant": false,
+          "is_immutable": false,
+          "initial_value": "0"
+        }
+      ],
+      "functions": [
+        {
+          "id": "vulnerablebank.constructor()",
+          "name": "constructor",
+          "signature": "constructor()",
+          "visibility": "public",
+          "state_mutability": "nonpayable",
+          "modifiers": [],
+          "parameters": [],
+          "returns": [],
+          "source_location": {
+            "file": "tests/fixtures/contracts/VulnerableBank.sol",
+            "start_line": 17,
+            "end_line": 19
+          },
+          "natspec": {
+            "notice": "",
+            "dev": ""
+          },
+          "calls": [],
+          "external_calls": [],
+          "reads": [],
+          "writes": [
+            "vulnerablebank.owner"
+          ],
+          "emits": [],
+          "has_external_calls": false,
+          "handles_value": false,
+          "reads_oracle": false,
+          "is_privileged": false
+        },
+        {
+          "id": "vulnerablebank.deposit()",
+          "name": "deposit",
+          "signature": "deposit()",
+          "visibility": "external",
+          "state_mutability": "payable",
+          "modifiers": [],
+          "parameters": [],
+          "returns": [],
+          "source_location": {
+            "file": "tests/fixtures/contracts/VulnerableBank.sol",
+            "start_line": 21,
+            "end_line": 24
+          },
+          "natspec": {
+            "notice": "",
+            "dev": ""
+          },
+          "calls": [],
+          "external_calls": [],
+          "reads": [],
+          "writes": [
+            "vulnerablebank.balances"
+          ],
+          "emits": [
+            "Deposited"
+          ],
+          "has_external_calls": false,
+          "handles_value": true,
+          "reads_oracle": false,
+          "is_privileged": false
+        },
+        {
+          "id": "vulnerablebank.withdraw(uint256)",
+          "name": "withdraw",
+          "signature": "withdraw(uint256)",
+          "visibility": "external",
+          "state_mutability": "nonpayable",
+          "modifiers": [],
+          "parameters": [
+            {
+              "name": "amount",
+              "type": "uint256"
+            }
+          ],
+          "returns": [],
+          "source_location": {
+            "file": "tests/fixtures/contracts/VulnerableBank.sol",
+            "start_line": 27,
+            "end_line": 34
+          },
+          "natspec": {
+            "notice": "VULNERABLE: state updated after external call (reentrancy).",
+            "dev": ""
+          },
+          "calls": [],
+          "external_calls": [
+            {
+              "id": "vulnerablebank.withdraw.call_0",
+              "call_type": "call",
+              "target_type": "user_controlled",
+              "line": 30
+            }
+          ],
+          "reads": [
+            "vulnerablebank.balances"
+          ],
+          "writes": [
+            "vulnerablebank.balances"
+          ],
+          "emits": [
+            "Withdrawn"
+          ],
+          "has_external_calls": true,
+          "handles_value": false,
+          "reads_oracle": false,
+          "is_privileged": false
+        },
+        {
+          "id": "vulnerablebank.emergencyDrain()",
+          "name": "emergencyDrain",
+          "signature": "emergencyDrain()",
+          "visibility": "external",
+          "state_mutability": "nonpayable",
+          "modifiers": [],
+          "parameters": [],
+          "returns": [],
+          "source_location": {
+            "file": "tests/fixtures/contracts/VulnerableBank.sol",
+            "start_line": 37,
+            "end_line": 40
+          },
+          "natspec": {
+            "notice": "VULNERABLE: no access control \u2014 anyone can drain the contract.",
+            "dev": ""
+          },
+          "calls": [],
+          "external_calls": [
+            {
+              "id": "vulnerablebank.emergencyDrain.transfer_0",
+              "call_type": "transfer",
+              "target_type": "user_controlled",
+              "line": 39
+            }
+          ],
+          "reads": [],
+          "writes": [],
+          "emits": [],
+          "has_external_calls": true,
+          "handles_value": false,
+          "reads_oracle": false,
+          "is_privileged": true
+        },
+        {
+          "id": "vulnerablebank.calculateShares(uint256,uint256)",
+          "name": "calculateShares",
+          "signature": "calculateShares(uint256,uint256)",
+          "visibility": "public",
+          "state_mutability": "pure",
+          "modifiers": [],
+          "parameters": [
+            {
+              "name": "depositAmount",
+              "type": "uint256"
+            },
+            {
+              "name": "totalDeposits",
+              "type": "uint256"
+            }
+          ],
+          "returns": [
+            {
+              "name": "",
+              "type": "uint256"
+            }
+          ],
+          "source_location": {
+            "file": "tests/fixtures/contracts/VulnerableBank.sol",
+            "start_line": 43,
+            "end_line": 50
+          },
+          "natspec": {
+            "notice": "VULNERABLE: precision loss (divide before multiply).",
+            "dev": ""
+          },
+          "calls": [],
+          "external_calls": [],
+          "reads": [],
+          "writes": [],
+          "emits": [],
+          "has_external_calls": false,
+          "handles_value": false,
+          "reads_oracle": false,
+          "is_privileged": false
+        },
+        {
+          "id": "vulnerablebank.collectFee(uint256)",
+          "name": "collectFee",
+          "signature": "collectFee(uint256)",
+          "visibility": "external",
+          "state_mutability": "nonpayable",
+          "modifiers": [],
+          "parameters": [
+            {
+              "name": "amount",
+              "type": "uint256"
+            }
+          ],
+          "returns": [
+            {
+              "name": "",
+              "type": "uint256"
+            }
+          ],
+          "source_location": {
+            "file": "tests/fixtures/contracts/VulnerableBank.sol",
+            "start_line": 55,
+            "end_line": 62
+          },
+          "natspec": {
+            "notice": "Collect protocol fee from amount. Fee rate is feeRate basis points of amount.",
+            "dev": "VULNERABLE: integer precision loss \u2014 fee = amount * feeRate / 10000 truncates to 0 for small amounts"
+          },
+          "source_code": "function collectFee(uint256 amount) external returns (uint256) {\n    uint256 fee = amount * feeRate / 10000;\n    feesCollected += fee;\n    return fee;\n}",
+          "calls": [],
+          "external_calls": [],
+          "reads": [
+            "vulnerablebank.feeRate",
+            "vulnerablebank.feesCollected"
+          ],
+          "writes": [
+            "vulnerablebank.feesCollected"
+          ],
+          "emits": [],
+          "has_external_calls": false,
+          "handles_value": false,
+          "reads_oracle": false,
+          "is_privileged": false
+        }
+      ],
+      "modifiers": [],
+      "events": [
+        {
+          "id": "vulnerablebank.Deposited",
+          "name": "Deposited",
+          "contract_id": "vulnerablebank",
+          "parameters": [
+            "address indexed user",
+            "uint256 amount"
+          ]
+        },
+        {
+          "id": "vulnerablebank.Withdrawn",
+          "name": "Withdrawn",
+          "contract_id": "vulnerablebank",
+          "parameters": [
+            "address indexed user",
+            "uint256 amount"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "simpletoken",
+      "name": "SimpleToken",
+      "source_file": "tests/fixtures/contracts/SimpleToken.sol",
+      "kind": "contract",
+      "compiler_version": "^0.8.20",
+      "is_abstract": false,
+      "inherits": [],
+      "natspec": {
+        "notice": "Minimal ERC-20 implementation for testing.",
+        "dev": ""
+      },
+      "state_variables": [
+        {
+          "id": "simpletoken.name",
+          "name": "name",
+          "type": "string",
+          "visibility": "public",
+          "is_constant": false,
+          "is_immutable": false,
+          "initial_value": "\"SimpleToken\""
+        },
+        {
+          "id": "simpletoken.symbol",
+          "name": "symbol",
+          "type": "string",
+          "visibility": "public",
+          "is_constant": false,
+          "is_immutable": false,
+          "initial_value": "\"ST\""
+        },
+        {
+          "id": "simpletoken.decimals",
+          "name": "decimals",
+          "type": "uint8",
+          "visibility": "public",
+          "is_constant": false,
+          "is_immutable": false,
+          "initial_value": "18"
+        },
+        {
+          "id": "simpletoken.totalSupply",
+          "name": "totalSupply",
+          "type": "uint256",
+          "visibility": "public",
+          "is_constant": false,
+          "is_immutable": false,
+          "initial_value": ""
+        },
+        {
+          "id": "simpletoken.balanceOf",
+          "name": "balanceOf",
+          "type": "mapping(address => uint256)",
+          "visibility": "public",
+          "is_constant": false,
+          "is_immutable": false,
+          "initial_value": ""
+        },
+        {
+          "id": "simpletoken.allowance",
+          "name": "allowance",
+          "type": "mapping(address => mapping(address => uint256))",
+          "visibility": "public",
+          "is_constant": false,
+          "is_immutable": false,
+          "initial_value": ""
+        }
+      ],
+      "functions": [
+        {
+          "id": "simpletoken.constructor(uint256)",
+          "name": "constructor",
+          "signature": "constructor(uint256)",
+          "visibility": "public",
+          "state_mutability": "nonpayable",
+          "modifiers": [],
+          "parameters": [
+            {
+              "name": "_initialSupply",
+              "type": "uint256"
+            }
+          ],
+          "returns": [],
+          "source_location": {
+            "file": "tests/fixtures/contracts/SimpleToken.sol",
+            "start_line": 12,
+            "end_line": 16
+          },
+          "natspec": {
+            "notice": "",
+            "dev": ""
+          },
+          "calls": [],
+          "external_calls": [],
+          "reads": [],
+          "writes": [
+            "simpletoken.totalSupply",
+            "simpletoken.balanceOf"
+          ],
+          "emits": [
+            "Transfer"
+          ],
+          "has_external_calls": false,
+          "handles_value": false,
+          "reads_oracle": false,
+          "is_privileged": false
+        },
+        {
+          "id": "simpletoken.transfer(address,uint256)",
+          "name": "transfer",
+          "signature": "transfer(address,uint256)",
+          "visibility": "public",
+          "state_mutability": "nonpayable",
+          "modifiers": [],
+          "parameters": [
+            {
+              "name": "_to",
+              "type": "address"
+            },
+            {
+              "name": "_value",
+              "type": "uint256"
+            }
+          ],
+          "returns": [
+            {
+              "name": "",
+              "type": "bool"
+            }
+          ],
+          "source_location": {
+            "file": "tests/fixtures/contracts/SimpleToken.sol",
+            "start_line": 18,
+            "end_line": 24
+          },
+          "natspec": {
+            "notice": "",
+            "dev": ""
+          },
+          "calls": [],
+          "external_calls": [],
+          "reads": [
+            "simpletoken.balanceOf"
+          ],
+          "writes": [
+            "simpletoken.balanceOf"
+          ],
+          "emits": [
+            "Transfer"
+          ],
+          "has_external_calls": false,
+          "handles_value": false,
+          "reads_oracle": false,
+          "is_privileged": false
+        },
+        {
+          "id": "simpletoken.approve(address,uint256)",
+          "name": "approve",
+          "signature": "approve(address,uint256)",
+          "visibility": "public",
+          "state_mutability": "nonpayable",
+          "modifiers": [],
+          "parameters": [
+            {
+              "name": "_spender",
+              "type": "address"
+            },
+            {
+              "name": "_value",
+              "type": "uint256"
+            }
+          ],
+          "returns": [
+            {
+              "name": "",
+              "type": "bool"
+            }
+          ],
+          "source_location": {
+            "file": "tests/fixtures/contracts/SimpleToken.sol",
+            "start_line": 26,
+            "end_line": 30
+          },
+          "natspec": {
+            "notice": "",
+            "dev": ""
+          },
+          "calls": [],
+          "external_calls": [],
+          "reads": [],
+          "writes": [
+            "simpletoken.allowance"
+          ],
+          "emits": [
+            "Approval"
+          ],
+          "has_external_calls": false,
+          "handles_value": false,
+          "reads_oracle": false,
+          "is_privileged": false
+        },
+        {
+          "id": "simpletoken.transferFrom(address,address,uint256)",
+          "name": "transferFrom",
+          "signature": "transferFrom(address,address,uint256)",
+          "visibility": "public",
+          "state_mutability": "nonpayable",
+          "modifiers": [],
+          "parameters": [
+            {
+              "name": "_from",
+              "type": "address"
+            },
+            {
+              "name": "_to",
+              "type": "address"
+            },
+            {
+              "name": "_value",
+              "type": "uint256"
+            }
+          ],
+          "returns": [
+            {
+              "name": "",
+              "type": "bool"
+            }
+          ],
+          "source_location": {
+            "file": "tests/fixtures/contracts/SimpleToken.sol",
+            "start_line": 32,
+            "end_line": 41
+          },
+          "natspec": {
+            "notice": "",
+            "dev": ""
+          },
+          "calls": [],
+          "external_calls": [],
+          "reads": [
+            "simpletoken.balanceOf",
+            "simpletoken.allowance"
+          ],
+          "writes": [
+            "simpletoken.balanceOf",
+            "simpletoken.allowance"
+          ],
+          "emits": [
+            "Transfer"
+          ],
+          "has_external_calls": false,
+          "handles_value": false,
+          "reads_oracle": false,
+          "is_privileged": false
+        }
+      ],
+      "modifiers": [],
+      "events": [
+        {
+          "id": "simpletoken.Transfer",
+          "name": "Transfer",
+          "contract_id": "simpletoken",
+          "parameters": [
+            "address indexed from",
+            "address indexed to",
+            "uint256 value"
+          ]
+        },
+        {
+          "id": "simpletoken.Approval",
+          "name": "Approval",
+          "contract_id": "simpletoken",
+          "parameters": [
+            "address indexed owner",
+            "address indexed spender",
+            "uint256 value"
+          ]
+        }
+      ]
+    }
+  ]
+}

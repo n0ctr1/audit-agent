@@ -1,0 +1,1555 @@
+{
+  "contest_id": "c4-2026-04-monetrix",
+  "run_index": 0,
+  "audit_id": "e15aeb56-b09b-43cb-a96a-c7c5f90bf321",
+  "started_at": "2026-10-15T06:56:33.612904+00:00",
+  "status": "ok",
+  "error": null,
+  "state": {
+    "hypotheses": [
+      {
+        "id": "ae4269f9-bae7-4af6-91f5-0640b9d85e55",
+        "audit_id": "e15aeb56-b09b-43cb-a96a-c7c5f90bf321",
+        "title": "Distributable surplus bypass via same-block backing inflation (deposit-settle-withdraw sandwich)",
+        "vulnerability_class": "Temporal Snapshot Manipulation",
+        "affected_functions": [
+          "settleDailyPnL",
+          "totalBackingSigned",
+          "_readL1Backing"
+        ],
+        "attack_scenario": "1. Attacker detects pending settlement transaction from the vault.\n2. Attacker frontruns by depositing USDC into the vault (or redeem escrow), inflating usdc.balanceOf(vault) read by totalBackingSigned().\n3. settleDailyPnL calls distributableSurplus() which reads the inflated backing, producing a large positive surplus.\n4. Gate 3 (ds > 0) and the proposedYield <= distributable check pass against this inflated value.\n5. Yield is settled and distributed based on phantom backing that doesn't represent real protocol profit.\n6. Attacker withdraws their deposited USDC in the same block or next block.\n7. The protocol has now distributed yield it doesn't actually have, creating an insolvency condition. The invariant violated is: distributable surplus must represent genuine accumulated profit, not transient deposits.\n\n--- Consolidated attack vectors ---\n[Alt vector \u2014 Annualized cap inflated by transient totalSupply spike at se]: 1. Attacker observes pending settlement transaction in the mempool.\n2. Attacker frontruns by minting a large amount of USDM (e.g., depositing USDC to mint USDM) in the same block or immediately before settlement.\n3. settleDailyPnL executes and reads usdm.totalSupply() \u2014 the supply is now artificiall\n[Alt vector \u2014 Annualized APR cap uses mutable usdm.totalSupply() enabling ]: 1. The annualized cap formula is: cap = (usdm.totalSupply() * maxAnnualYieldBps * elapsed) / (10_000 * 365 days).\n2. usdm.totalSupply() is read at the moment settleDailyPnL is called, not at the start of the settlement period.\n3. If the Vault (or an attacker who compromises the Vault's operator key)\n[Alt vector \u2014 SWC-116: block.timestamp manipulation inflates annualized yi]: 1. Attacker is a validator/block producer (or colludes with one).\n2. Real elapsed time since lastSettlementTime is slightly above minSettlementInterval.\n3. Attacker produces a block with block.timestamp inflated by up to ~15 seconds beyond real time.\n4. Calls settleDailyPnL with a proposedYield that",
+        "required_preconditions": [
+          "Deposits into the vault must be permissionless and take effect immediately",
+          "Withdrawals must be possible shortly after settlement",
+          "distributableSurplus() must not exclude recent deposits from its calculation"
+        ],
+        "estimated_severity": "critical",
+        "similar_historical_cases": [
+          "Euler Finance flash-loan based share price manipulation",
+          "bZx protocol TVL manipulation via same-block deposit-exploit-withdraw"
+        ],
+        "priority_score": 90.0,
+        "confidence": null,
+        "subgraph_context": null,
+        "status": "pending"
+      },
+      {
+        "id": "38623a95-421f-44e9-86d0-ef53beb2dbb4",
+        "audit_id": "e15aeb56-b09b-43cb-a96a-c7c5f90bf321",
+        "title": "Missing nonce in signed action enables unlimited replay of limit orders",
+        "vulnerability_class": "Missing Nonce / Replay Protection",
+        "affected_functions": [
+          "_sendLimitOrder"
+        ],
+        "attack_scenario": "1. User signs a limit order to buy asset X at price P via _sendLimitOrder. 2. The signed action bytes contain no nonce field. 3. After the order is executed once, an attacker (or any relayer) re-submits the identical signed action bytes. 4. Since no nonce is checked or incremented, the receiving contract accepts and executes the duplicate order. 5. This can be repeated indefinitely, draining funds or creating unwanted positions.\n\n--- Consolidated attack vectors ---\n[Alt vector \u2014 Missing deadline/validity window in signed action \u2014 orders v]: 1. User signs a limit order to buy at price P when market price is favorable. 2. The signed action contains no deadline or validUntil field. 3. Market conditions change dramatically (price crashes or spikes). 4. An attacker retrieves the old signed order (from mempool, logs, or storage) and replays \n[Alt vector \u2014 Missing domain separator (chainId + contract) enables cross-]: 1. User signs a limit order on Chain A (e.g., Arbitrum) for a specific contract instance. 2. The signed action bytes contain no chainId and no verifying contract address. 3. Attacker takes the identical signed action bytes and submits them to the same contract deployed on Chain B (e.g., a testnet or\n[Alt vector \u2014 abi.encodePacked outer wrapper lacks explicit type/length ta]: 1. Currently ACTION_VERSION and ACTION_LIMIT_ORDER are likely fixed-size constants (e.g., uint8), making the outer abi.encodePacked safe. 2. However, if ACTION_VERSION is ever changed to a variable-length type (bytes, string), the boundary between the version field and the action type field becomes ",
+        "required_preconditions": [
+          "The receiving contract or _sendRaw does not independently track or enforce nonce uniqueness for signed actions",
+          "The signed action is submitted on-chain or to a relayer that does not deduplicate"
+        ],
+        "estimated_severity": "high",
+        "similar_historical_cases": [
+          "SWC-121: Missing protection against signature replay attacks",
+          "Numerous DEX replay bugs where signed orders lacked nonces"
+        ],
+        "priority_score": 90.0,
+        "confidence": null,
+        "subgraph_context": null,
+        "status": "pending"
+      },
+      {
+        "id": "2d62d461-1e20-46df-a670-569813a22965",
+        "audit_id": "e15aeb56-b09b-43cb-a96a-c7c5f90bf321",
+        "title": "Double-counting of supplied USDC in _readL1Backing: perp account value may already include PM-supplied margin",
+        "vulnerability_class": "Precision Loss",
+        "affected_functions": [
+          "_readL1Backing",
+          "totalBackingSigned",
+          "settleDailyPnL"
+        ],
+        "attack_scenario": "1. Vault supplies USDC to HyperCore PM pool (0x811). The supplied amount becomes margin for perp positions.\n2. PRECOMPILE_ACCOUNT_MARGIN_SUMMARY (0x80F) returns accountValueSigned which on Hyperliquid includes the cash/margin balance in the perp account PLUS unrealized PnL.\n3. _readL1Backing adds accountValueSigned (which includes the supplied margin) AND then adds suppliedUsdcEvm (the 0x811 supplied balance) separately.\n4. The same USDC is counted twice in totalBackingSigned \u2014 once inside the perp account value and once as a separate supplied line item.\n5. This inflates totalBackingSigned above true economic value, making surplus() and distributableSurplus() artificially high.\n6. Vault calls settleDailyPnL with a proposedYield that extracts the phantom surplus, declaring yield that doesn't exist.\n7. Yield is distributed to sUSDM stakers, diluting USDM backing below 1:1.",
+        "required_preconditions": [
+          "accountValueSigned from 0x80F includes the cash/margin balance that overlaps with 0x811 supplied balance",
+          "Vault has active 0x811 USDC supply and perp positions",
+          "The double-counted amount exceeds minSettlementInterval yield caps"
+        ],
+        "estimated_severity": "critical",
+        "similar_historical_cases": [
+          "Double-counting of collateral in margin accounting leading to phantom surplus extraction"
+        ],
+        "priority_score": 85.0,
+        "confidence": null,
+        "subgraph_context": null,
+        "status": "pending"
+      },
+      {
+        "id": "2e787aa6-e0cd-44ad-bbd2-808824e923bb",
+        "audit_id": "e15aeb56-b09b-43cb-a96a-c7c5f90bf321",
+        "title": "Double-counting of spot USDC between perp account value (0x80F) and explicit spot reads (0x801) inflates totalBackingSigned",
+        "vulnerability_class": "Precision Loss",
+        "affected_functions": [
+          "totalBackingSigned",
+          "_readL1Backing",
+          "distributableSurplus",
+          "surplus"
+        ],
+        "attack_scenario": "1. The Accountant calls totalBackingSigned() which calls _readL1Backing(vault, vaultSupplied).\n2. _readL1Backing first reads _readPerpAccountValueSigned(account) via PRECOMPILE_ACCOUNT_MARGIN_SUMMARY (0x80F). On Hyperliquid, the margin summary for cross-margin accounts includes the full account equity \u2014 spot wallet balances, supplied collateral, and unrealized perp PnL are all rolled into the signed account value.\n3. _readL1Backing then ADDITIONALLY reads _readSpotUsdcBalance(account) via PRECOMPILE_SPOT_BALANCE (0x801) and adds it to total.\n4. It then iterates suppliedList and adds suppliedBalance (0x811) for each registered slot \u2014 also already reflected in the 0x80F cross-margin equity.\n5. If 0x80F indeed includes spot and supplied balances (standard for Hyperliquid cross-margin), the same USDC is counted twice: once inside the perp account value and once as an explicit addition.\n6. This inflates totalBackingSigned, which inflates surplus(), which inflates distributableSurplus().\n7. The Vault's settleDailyPnL Gate 3 (proposedYield \u2264 distributableSurplus) would then allow yield declaration backed by phantom surplus \u2014 USDC that doesn't actually exist.\n8. An operator or attacker who can trigger settleDailyPnL could extract yield that exceeds actual protocol profits, draining the vault over time.\n\n--- Consolidated attack vectors ---\n[Alt vector \u2014 RedeemEscrow USDC double-counted with pending redemption obl]: 1. User requests redemption of USDM \u2192 Vault transfers USDC from vault to RedeemEscrow and calls addObligation(amount).\n2. totalBackingSigned() counts: `usdc.balanceOf(vault)` + `usdc.balanceOf(redeemEscrow)`.\n3. The USDC moved to RedeemEscrow is still counted in totalBacking even though it is earmar\n[Alt vector \u2014 Stale registered slot in suppliedList causes totalBackingSig]: 1. Operator registers a supplied asset slot (e.g., token index 5) via addVaultSupplied, adding it to vaultSupplied[]. 2. Later, the position is fully withdrawn from the HyperCore PM pool on L1 (balance becomes 0), but the Operator forgets to call removeVaultSupplied. 3. The HyperCore precompile for ",
+        "required_preconditions": [
+          "Hyperliquid 0x80F PRECOMPILE_ACCOUNT_MARGIN_SUMMARY returns cross-margin account equity that includes spot wallet balances and/or supplied collateral (standard Hyperliquid behavior for cross-margin accounts)",
+          "The vault's L1 account uses cross-margin mode (default on Hyperliquid)",
+          "settleDailyPnL is called periodically by the Vault"
+        ],
+        "estimated_severity": "critical",
+        "similar_historical_cases": [
+          "Double-counting of collateral in cross-margin accounts leading to phantom surplus extraction",
+          "NAV inflation via counting the same asset in multiple venues"
+        ],
+        "priority_score": 85.0,
+        "confidence": null,
+        "subgraph_context": null,
+        "status": "pending"
+      },
+      {
+        "id": "fa492483-b8d4-4681-bc43-a07704268f4d",
+        "audit_id": "e15aeb56-b09b-43cb-a96a-c7c5f90bf321",
+        "title": "HLP vault equity unit mismatch: raw uint64 added without L1\u2192EVM decimal conversion",
+        "vulnerability_class": "Precision Loss",
+        "affected_functions": [
+          "MonetrixAccountant._readHlpEquity",
+          "MonetrixAccountant._readL1Backing",
+          "MonetrixAccountant.totalBackingSigned",
+          "MonetrixAccountant.surplus"
+        ],
+        "attack_scenario": "1. The protocol's L1 precompiles consistently use 8dp for USDC-denominated values (spot balances, supplied balances). The code explicitly converts these via usdcL1WeiToEvm (\u00f7100) before adding to the backing total.\n2. _readHlpEquity() reads vaultEquity from the HLP_VAULT precompile (0x802) and returns the raw uint64 equity value with NO decimal conversion.\n3. If HLP vault equity is denominated in L1 8dp (consistent with other L1 precompile USDC values), it is added at 100\u00d7 its true 6dp EVM value.\n4. This inflates totalBackingSigned() by up to 99\u00d7 the actual HLP equity.\n5. surplus() = totalBackingSigned() - usdm.totalSupply() becomes massively overstated.\n6. Attacker (or keeper) calls settleDailyPnL with a proposedYield that passes Gate 3 (proposedYield \u2264 distributableSurplus) only because surplus is inflated by the unconverted HLP equity.\n7. Yield is declared and distributed from funds that don't actually exist in backing, creating an insolvent position that will be discovered when HLP is withdrawn or a redemption wave hits.",
+        "required_preconditions": [
+          "HLP vault precompile (0x802) returns equity in L1 8dp wei (same denomination as spot/supplied precompiles)",
+          "HLP vault holds non-trivial equity (the larger the HLP position, the larger the overstatement)",
+          "settleDailyPnL has not yet been called for the current interval"
+        ],
+        "estimated_severity": "critical",
+        "similar_historical_cases": [
+          "Fei Protocol TRIBE inflation bug (unit mismatch in reserve valuation)",
+          "Various ERC-4626 vault decimal mismatch exploits"
+        ],
+        "priority_score": 78.0,
+        "confidence": null,
+        "subgraph_context": null,
+        "status": "pending"
+      },
+      {
+        "id": "9435c404-0412-454d-8cb5-692ae2b8d150",
+        "audit_id": "e15aeb56-b09b-43cb-a96a-c7c5f90bf321",
+        "title": "RedeemEscrow totalOwed can be set without collateralization check, enabling underfunded redemption queue",
+        "vulnerability_class": "Cross-Contract Invariant Violation",
+        "affected_functions": [
+          "RedeemEscrow.addObligation",
+          "RedeemEscrow.payOut",
+          "RedeemEscrow.reclaimTo",
+          "MonetrixVault.requestRedeem"
+        ],
+        "attack_scenario": "1. Vault.requestRedeem calls RedeemEscrow.addObligation(amount) to record a new redemption obligation. 2. addObligation increments totalOwed WITHOUT checking whether the Escrow actually holds sufficient USDC to cover the new total. 3. If the Vault has a bug or is manipulated into calling addObligation with amounts exceeding available USDC, totalOwed exceeds the Escrow's actual balance. 4. The reclaimTo guard (bal >= amount + totalOwed) now prevents ANY reclamation because totalOwed alone exceeds bal \u2014 even though the excess obligation is phantom. 5. Meanwhile, payOut will revert on 'insufficient liquidity' for legitimate claimants. 6. The Escrow is effectively frozen: users cannot claim (no liquidity), Vault cannot reclaim (totalOwed too high). The only recovery is for someone to deposit USDC into the Escrow to cover the shortfall. This is a cross-contract issue because the invariant (totalOwed <= balance) depends on BOTH the Vault correctly funding the Escrow AND the Escrow's addObligation not verifying collateralization.",
+        "required_preconditions": [
+          "Vault calls addObligation for amounts not backed by USDC already in the Escrow",
+          "No separate funding step guarantees USDC arrives in Escrow before or atomically with addObligation"
+        ],
+        "estimated_severity": "high",
+        "similar_historical_cases": [
+          "Underfunded escrow in early dYdX Solo Margin",
+          "Obligation tracking without collateralization in Tornado Cash governance"
+        ],
+        "priority_score": 78.0,
+        "confidence": null,
+        "subgraph_context": null,
+        "status": "pending"
+      },
+      {
+        "id": "7eb3151f-8294-48dc-9583-c24df82bb210",
+        "audit_id": "e15aeb56-b09b-43cb-a96a-c7c5f90bf321",
+        "title": "L1 balance check uses `total` instead of `total - hold`, allowing bridge of locked/margin funds",
+        "vulnerability_class": "SWC-115",
+        "affected_functions": [
+          "bridgeYieldFromL1",
+          "_sendL1Bridge"
+        ],
+        "attack_scenario": "1. Operator calls bridgeYieldFromL1(amount) where amount passes the yieldShortfall() cap.\n2. _sendL1Bridge reads spotBalance(address(this), usdcToken).total \u2014 this includes USDC that is currently on hold (e.g., locked as margin for open perp positions or resting limit orders).\n3. The require(l1Available >= usdcEvmToL1Wei(amount)) passes because total (including held) exceeds the bridge amount.\n4. The ACTION_SEND_ASSET is dispatched to HyperCore via CoreWriter.\n5. HyperCore processes the bridge, withdrawing USDC from the Vault's L1 spot balance \u2014 including funds that were serving as margin.\n6. The Vault's L1 perp account is now undercollateralized because its margin was bridged away, potentially triggering forced liquidations at unfavorable prices.\n7. This violates the delta-neutrality invariant: the hedge legs remain open but the margin backing them has been extracted, creating unhedged directional exposure.\n\n--- Consolidated attack vectors ---\n[Alt vector \u2014 Cross-contract invariant gap: yieldShortfall() composes thre]: 1. Operator calls bridgeYieldFromL1(amount). 2. yieldShortfall() reads accountant.surplus(), usdc.balanceOf(), and redeemEscrow.shortfall() sequentially via separate staticcalls. 3. If a state-changing transaction in the same block (e.g., a redemption or deposit) modifies redeemEscrow.shortfall() or\n[Alt vector \u2014 No replay protection (nonce/deadline) in bridgeYieldFromL1 o]: 1. Operator's key is compromised (phishing, key leak, or malicious operator).\n2. Attacker calls bridgeYieldFromL1(amount) repeatedly with the same or varying amounts.\n3. Each call produces a valid action sent to CORE_WRITER via _sendRaw.\n4. There is no nonce that increments per bridge operation, no ",
+        "required_preconditions": [
+          "pmEnabled is false (so only spot balance is checked, not supplied)",
+          "Vault has open perp positions or resting orders on L1 that have placed USDC on hold",
+          "hold amount is significant relative to total spot balance"
+        ],
+        "estimated_severity": "high",
+        "similar_historical_cases": [
+          "Using gross balance instead of net-available for withdrawal checks in margin accounts"
+        ],
+        "priority_score": 72.0,
+        "confidence": null,
+        "subgraph_context": null,
+        "status": "pending"
+      },
+      {
+        "id": "6031e689-30e3-4bf2-9207-44bdacc78479",
+        "audit_id": "e15aeb56-b09b-43cb-a96a-c7c5f90bf321",
+        "title": "Unvalidated ICoreWriter.sendRawAction return allows outstandingL1Principal decrement without guaranteed bridge execution",
+        "vulnerability_class": "Cross-Contract Invariant Gap",
+        "affected_functions": [
+          "emergencyBridgePrincipalFromL1",
+          "_sendL1Bridge",
+          "_sendRaw",
+          "sendBridgeToL1"
+        ],
+        "attack_scenario": "1. Governor calls emergencyBridgePrincipalFromL1(amount). 2. outstandingL1Principal is decremented by amount (state update committed before external call). 3. _sendL1Bridge checks L1 balance via precompile staticcall (passes). 4. ActionEncoder.sendBridgeToL1 encodes the bridge action and calls _sendRaw. 5. _sendRaw calls ICoreWriter(CORE_WRITER).sendRawAction(action) with NO return value check. 6. If CORE_WRITER has been upgraded/paused/reconfigured such that sendRawAction succeeds (does not revert) but silently drops or queues the bridge action without execution, the vault's outstandingL1Principal is permanently decremented while no actual L1 bridge occurs. 7. Repeated calls could drain the accounting ledger of outstandingL1Principal without any corresponding L1 fund movement, breaking the cross-contract invariant between vault accounting and actual L1 settlement.",
+        "required_preconditions": [
+          "ICoreWriter.sendRawAction must be capable of succeeding (not reverting) without actually executing the bridge \u2014 e.g., via a pause mechanism, queueing mode, or upgrade to a no-op implementation",
+          "CORE_WRITER contract address is mutable or upgradeable by a party that may not be the same governor controlling the vault"
+        ],
+        "estimated_severity": "high",
+        "similar_historical_cases": [
+          "Cross-contract invariant gaps where external call success is assumed without return validation",
+          "ERC-4626 vaults that trust external protocol return values without sanity checks"
+        ],
+        "priority_score": 72.0,
+        "confidence": null,
+        "subgraph_context": null,
+        "status": "pending"
+      },
+      {
+        "id": "78e71a68-6eca-451e-a89e-6ce62e09765c",
+        "audit_id": "e15aeb56-b09b-43cb-a96a-c7c5f90bf321",
+        "title": "Non-atomic L1/EVM cross-domain backing read enables surplus manipulation in settleDailyPnL",
+        "vulnerability_class": "Cross-Contract Stale Read",
+        "affected_functions": [
+          "MonetrixAccountant.totalBackingSigned",
+          "MonetrixAccountant._readL1Backing",
+          "PrecompileReader.spotBalance",
+          "PrecompileReader.accountValueSigned",
+          "PrecompileReader.suppliedBalance"
+        ],
+        "attack_scenario": "1. Accountant.settleDailyPnL is called by Vault. 2. totalBackingSigned() begins reading EVM USDC balances (Vault + RedeemEscrow) via standard ERC20.balanceOf. 3. Between EVM reads and L1 precompile reads (0x801, 0x80F, 0x811), an operator executes L1 trades or market moves on HyperCore, changing perp account values or spot balances. 4. L1 precompile reads return post-movement values while EVM reads captured pre-movement values. 5. The composite 'total' mixes EVM snapshots from time T1 with L1 snapshots from time T2. 6. If L1 value increased (e.g., favorable trade), surplus is overstated \u2192 more yield is declared than truly earned. If L1 value decreased, yield is suppressed. An operator with L1 trading capability could time trades to inflate the backing snapshot during settlement.",
+        "required_preconditions": [
+          "Operator has ability to execute L1 trades (hedge/repair) in the same transaction or block as settleDailyPnL",
+          "L1 positions are large enough that market movement between EVM and L1 reads materially affects backing",
+          "Precompile reads and EVM reads are not atomic (different call contexts)"
+        ],
+        "estimated_severity": "medium",
+        "similar_historical_cases": [
+          "Cross-domain oracle staleness in multi-chain yield aggregators",
+          "Non-atomic snapshot exploitation in Yearn vault harvest()"
+        ],
+        "priority_score": 72.0,
+        "confidence": null,
+        "subgraph_context": null,
+        "status": "pending"
+      },
+      {
+        "id": "fb290c8e-c4bd-407f-95b3-e7357391b899",
+        "audit_id": "e15aeb56-b09b-43cb-a96a-c7c5f90bf321",
+        "title": "totalBacking() floor discards positive EVM USDC when L1 perp losses dominate aggregate",
+        "vulnerability_class": "Aggregation Floor Bug",
+        "affected_functions": [
+          "totalBacking",
+          "totalBackingSigned",
+          "_readL1Backing"
+        ],
+        "attack_scenario": "1. Protocol holds significant USDC in EVM vault (e.g., 10M USDC from recent deposits awaiting bridging to L1).\n2. Perp positions on L1 suffer large unrealized losses (e.g., -12M USDC signed account value) due to adverse price movement before hedges can be repaired.\n3. totalBackingSigned() aggregates: 10M (EVM USDC) + 5M (L1 spot) + (-12M) (perp) + 2M (supplied) + 1M (HLP) = 6M. Still positive, no issue yet.\n4. Losses deepen to -20M: aggregate = 10M + 5M + (-20M) + 2M + 1M = -2M.\n5. totalBacking() applies floor: returns 0 instead of the 18M in positive non-perp assets.\n6. Any downstream consumer (settleDailyPnL, surplus checks, peg defense) that uses totalBacking() sees 0 backing for the entire protocol, even though 18M USDC equivalent exists in non-perp venues.\n7. This could trigger false insolvency detection, block legitimate yield settlement (Gate 3: proposedYield \u2264 distributableSurplus would see zero/negative surplus), or cause unnecessary peg-defense actions.\n8. The correct behavior would be to floor only the signed perp component, not the entire aggregate, since EVM USDC and spot assets cannot go negative.",
+        "required_preconditions": [
+          "Perp account value can become sufficiently negative to overcome all positive components in the aggregate",
+          "Downstream functions (settleDailyPnL, surplus) rely on totalBacking() or totalBackingSigned() for yield gating or peg defense",
+          "The protocol operates with significant EVM-side USDC that is not yet deployed to L1"
+        ],
+        "estimated_severity": "medium",
+        "similar_historical_cases": [
+          "NAV calculation bugs where floor(max(0, sum)) discards positive components when one negative component dominates"
+        ],
+        "priority_score": 68.0,
+        "confidence": null,
+        "subgraph_context": null,
+        "status": "pending"
+      },
+      {
+        "id": "ed66e320-f6d6-4e4b-8a6d-6b566df08fd5",
+        "audit_id": "e15aeb56-b09b-43cb-a96a-c7c5f90bf321",
+        "title": "distributeYield can be DoS'd by sUSDM.injectYield reverting when userShare exceeds maxYieldPerInjection cap",
+        "vulnerability_class": "SWC-113 (DoS)",
+        "affected_functions": [
+          "distributeYield"
+        ],
+        "attack_scenario": "1. Yield accumulates in YieldEscrow to a large amount (e.g., 10M USDC) over many days without distribution. 2. Governor sets maxYieldPerInjection to a conservative value (e.g., 1M USDC) as defense-in-depth. 3. Operator calls distributeYield(). totalYield = 10M. userShare = 7M (70%). 4. usdm.mint(vault, 7M) succeeds. 5. susdm.injectYield(7M) reverts because 7M > maxYieldPerInjection (1M). 6. Entire distributeYield() reverts. USDC remains in vault (pulled from escrow but the pull also reverts since the tx reverts). 7. Yield is stuck in escrow \u2014 cannot be distributed in any amount until governance raises the cap. 8. Meanwhile, stakers miss out on yield that has already been declared by the Accountant. The function has no mechanism to distribute in batches or cap userShare at maxYieldPerInjection.\n\n--- Consolidated attack vectors ---\n[Alt vector \u2014 No on-chain validation that userYieldBps + insuranceYieldBps]: 1. Governor (24h timelock) sets userYieldBps = 9000 and insuranceYieldBps = 2000 (sum = 11000 > 10000). 2. Operator calls distributeYield() with totalYield = 1e12 (1M USDC). 3. userShare = (1e12 * 9000) / 10000 = 9e11. insuranceShare = (1e12 * 2000) / 10000 = 2e11. 4. foundationShare = 1e12 - 9e11 -\n[Alt vector \u2014 Unvalidated external call to InsuranceFund.deposit() \u2014 trust]: 1. Operator calls distributeYield(). 2. Yield is pulled from escrow; userShare and insuranceShare are computed. 3. USDC is force-approved to the InsuranceFund address retrieved from config. 4. _insuranceFund.deposit(insuranceShare) is called \u2014 an external call to a contract whose implementation is n\n[Alt vector \u2014 Cross-contract state snapshot gap: susdm.totalSupply() read ]: 1. distributeYield() reads susdm.totalSupply() to decide whether userShare should be rerouted to foundation (empty-vault guard). 2. If totalSupply == 0, userShare is set to 0 and foundationShare absorbs it. 3. If totalSupply > 0, the code proceeds to mint USDM, approve susdm, and call susdm.injectYi",
+        "required_preconditions": [
+          "Accumulated yield in YieldEscrow exceeds maxYieldPerInjection / (userYieldBps/10000)",
+          "maxYieldPerInjection is set conservatively by governance"
+        ],
+        "estimated_severity": "medium",
+        "similar_historical_cases": [
+          "DoS via external call revert in distribution pipeline"
+        ],
+        "priority_score": 65.0,
+        "confidence": null,
+        "subgraph_context": null,
+        "status": "pending"
+      },
+      {
+        "id": "51498b79-abc3-469b-859b-134547e88cf2",
+        "audit_id": "e15aeb56-b09b-43cb-a96a-c7c5f90bf321",
+        "title": "Accountant supply snapshot in settleDailyPnL is stale relative to Vault's subsequent USDM mint in distribution",
+        "vulnerability_class": "Cross-Contract Timing Gap",
+        "affected_functions": [
+          "MonetrixAccountant.settleDailyPnL",
+          "MonetrixVault.distributeYield",
+          "USDM.mint"
+        ],
+        "attack_scenario": "1. Vault calls Accountant.settleDailyPnL(proposedYield). 2. Accountant reads usdm.totalSupply() to enforce the annualized yield cap: proposedYield <= supply * maxAnnualYieldBps * deltaT / (10000 * 365 days). 3. Accountant approves and records the yield. 4. Vault proceeds to distribute: it calls usdm.mint() to mint user yield shares, increasing totalSupply. 5. If the Vault performs multiple settle+distribute cycles in rapid succession (e.g., catching up after downtime), each settlement's cap check uses the pre-mint supply from step 2, not the post-mint supply from step 4 of the previous cycle. 6. This means the annualized cap is checked against a supply that doesn't yet include previously settled yield, allowing the effective annualized rate to exceed maxAnnualYieldBps. With maxAnnualYieldBps at 1200 (12% APR), the actual rate could be marginally higher depending on settlement frequency and yield magnitude.",
+        "required_preconditions": [
+          "Multiple settleDailyPnL + distributeYield cycles occur within a short time window",
+          "minSettlementInterval (20h) is the only rate-limiter, and catch-up settlements are possible after initialization or pause",
+          "Yield amounts are material relative to total supply"
+        ],
+        "estimated_severity": "medium",
+        "similar_historical_cases": [
+          "Compound cToken exchange rate manipulation via rapid mint/redeem",
+          "Yearn v2 vault share price manipulation between harvest and distribution"
+        ],
+        "priority_score": 65.0,
+        "confidence": null,
+        "subgraph_context": null,
+        "status": "pending"
+      },
+      {
+        "id": "e227a0fb-8e05-4d4f-a9dc-44bd062de5f8",
+        "audit_id": "e15aeb56-b09b-43cb-a96a-c7c5f90bf321",
+        "title": "Missing domain separation in bridge action encoding enables cross-context replay",
+        "vulnerability_class": "Encoding - Missing Domain Separation",
+        "affected_functions": [
+          "sendBridgeToL1",
+          "_sendRaw",
+          "bridgeYieldFromL1"
+        ],
+        "attack_scenario": "1. Operator calls bridgeYieldFromL1(amount) on Chain A, producing action bytes via sendBridgeToL1.\n2. The action payload contains only: ACTION_VERSION, ACTION_SEND_ASSET, USDC_SYSTEM_ADDRESS, address(0), SPOT_DEX, token index, and l1Amount.\n3. No chain ID, contract address, or vault identifier is included in the encoded action.\n4. If the HyperCore CORE_WRITER processes actions across multiple chains or vault contexts, an attacker who observes the action on Chain A can submit the identical action bytes on Chain B.\n5. The action would be processed on Chain B, potentially moving USDC that was not intended to be bridged from that context.\n\n--- Consolidated attack vectors ---\n[Alt vector \u2014 address(0) recipient in encoded bridge action creates ambigu]: 1. sendBridgeToL1 encodes address(0) as the recipient (second field in abi.encode).\n2. In cross-chain bridge conventions, address(0) typically signals a burn-and-mint pattern.\n3. If the L1 side interprets address(0) literally as a transfer recipient rather than a burn signal, USDC is sent to the zer",
+        "required_preconditions": [
+          "HyperCore CORE_WRITER must accept actions from multiple chain contexts or vault instances",
+          "Attacker must be able to submit raw actions to CORE_WRITER on another chain/context",
+          "The same USDC_SYSTEM_ADDRESS and SPOT_DEX constants must be valid in the target context"
+        ],
+        "estimated_severity": "medium",
+        "similar_historical_cases": [
+          "Cross-chain replay attacks on bridge protocols lacking domain separation (e.g., early Multichain exploits)",
+          "EIP-712 introduced specifically to address missing domain separation in signed messages"
+        ],
+        "priority_score": 48.0,
+        "confidence": null,
+        "subgraph_context": null,
+        "status": "pending"
+      },
+      {
+        "id": "e9b558a9-1239-47ad-9dea-4f802bdf0380",
+        "audit_id": "e15aeb56-b09b-43cb-a96a-c7c5f90bf321",
+        "title": "abi.encodePacked field-boundary ambiguity between ACTION_VERSION and ACTION_VAULT_TRANSFER may yield hash collisions",
+        "vulnerability_class": "SWC-133 (Hash Collision / abi.encodePacked misuse)",
+        "affected_functions": [
+          "sendVaultDeposit"
+        ],
+        "attack_scenario": "1. Attacker observes a signed action: abi.encodePacked(ACTION_VERSION, ACTION_VAULT_TRANSFER, abi.encode(vault, true, usdAmount)). 2. If ACTION_VERSION is a variable-length type (e.g., bytes), attacker finds an alternate split of the leading bytes into (VERSION', TRANSFER') such that VERSION' || TRANSFER' == VERSION || TRANSFER' but VERSION' != VERSION and TRANSFER' != TRANSFER. 3. The identical packed byte array is presented to the verifier, which decodes it as a different action type or version, bypassing the intended semantic commitment of the signature. 4. If _sendRaw dispatches based on a re-decoded action type, the attacker can redirect a signed vault-deposit into a different action.",
+        "required_preconditions": [
+          "HyperCoreConstants.ACTION_VERSION or ACTION_VAULT_TRANSFER must be a variable-length Solidity type (bytes or string), not a fixed-width type like bytes1/uint8/bytes4",
+          "_sendRaw must transmit the packed bytes to a verifier that signs or signature-checks the raw packed output and then re-decodes the fields",
+          "The verifier must not independently enforce field lengths or delimiters beyond the raw byte equality"
+        ],
+        "estimated_severity": "medium",
+        "similar_historical_cases": [
+          "Uniswap Permit2 abi.encodePacked collision advisory",
+          "OpenZeppelin ECDSA.permit abi.encodePacked deprecation in favor of abi.encode"
+        ],
+        "priority_score": 45.0,
+        "confidence": null,
+        "subgraph_context": null,
+        "status": "pending"
+      },
+      {
+        "id": "8c4d4ad5-e70a-44c6-9371-b89be5762bc8",
+        "audit_id": "e15aeb56-b09b-43cb-a96a-c7c5f90bf321",
+        "title": "pmEnabled flag creates inconsistent L1 availability accounting \u2014 supplied assets ignored when flag is false",
+        "vulnerability_class": "Missing Input Validation",
+        "affected_functions": [
+          "_sendL1Bridge",
+          "emergencyBridgePrincipalFromL1"
+        ],
+        "attack_scenario": "1. The Vault has USDC supplied to the 0x811 Portfolio Margin pool (suppliedBalance > 0). 2. pmEnabled is set to false (e.g., due to a configuration change or initialization timing). 3. Governor calls emergencyBridgePrincipalFromL1 to bridge principal back from L1. 4. _sendL1Bridge only counts spotBalance.total, ignoring the supplied balance. 5. The require(l1Available >= usdcEvmToL1Wei(amount)) reverts even though the Vault has sufficient total L1 assets (spot + supplied). 6. This could prevent emergency withdrawal of principal when PM is disabled but funds are still supplied, creating an operational DoS for the emergency function. 7. Conversely, if pmEnabled is true but supplied funds have been withdrawn from PM (suppliedBalance = 0), the check still passes using only spot balance, which is correct but makes the pmEnabled flag misleading.",
+        "required_preconditions": [
+          "pmEnabled must be false while suppliedBalance > 0",
+          "Governor must attempt emergency bridge during this state inconsistency"
+        ],
+        "estimated_severity": "low",
+        "similar_historical_cases": [],
+        "priority_score": 40.0,
+        "confidence": null,
+        "subgraph_context": null,
+        "status": "pending"
+      },
+      {
+        "id": "3e65350b-f879-495c-8a05-2f3457f1bc39",
+        "audit_id": "e15aeb56-b09b-43cb-a96a-c7c5f90bf321",
+        "title": "Config yieldBps mutation between Vault read and distribution execution causes incorrect yield split",
+        "vulnerability_class": "Cross-Contract TOCTOU",
+        "affected_functions": [
+          "MonetrixVault.distributeYield",
+          "MonetrixConfig.userYieldBps",
+          "MonetrixConfig.insuranceYieldBps",
+          "MonetrixConfig.foundationYieldBps"
+        ],
+        "attack_scenario": "1. Vault operator initiates yield distribution flow. 2. Vault reads userYieldBps, insuranceYieldBps from MonetrixConfig to compute the three-way split (user/insurance/foundation). 3. Between the Config read and the actual USDC transfers to InsuranceFund/foundation and USDM mint to sUSDM, a governor transaction (24h timelock) executes setYieldBps() changing the ratios. 4. The Vault distributes using stale ratios that no longer reflect governance intent. If the old ratios allocated more to foundation/insurance and new ratios reduce those shares, the distribution uses the old (higher) amounts, potentially over-distributing to those recipients. The inverse is also possible: under-distribution to users. While the 24h timelock makes this difficult to exploit in practice, a queued governance action landing in the same block as a distribution could create a measurable discrepancy.",
+        "required_preconditions": [
+          "Governance setYieldBps transaction is queued and executes in close temporal proximity to a Vault distributeYield call",
+          "Vault does not cache or snapshot Config values at the start of the distribution transaction"
+        ],
+        "estimated_severity": "low",
+        "similar_historical_cases": [
+          "Governance parameter front-running in Compound/Aave",
+          "Config read staleness in MakerDAO vow.flog()"
+        ],
+        "priority_score": 35.0,
+        "confidence": null,
+        "subgraph_context": null,
+        "status": "pending"
+      },
+      {
+        "id": "3872ddbf-6b3d-476a-8d14-b08d456a5b95",
+        "audit_id": "e15aeb56-b09b-43cb-a96a-c7c5f90bf321",
+        "title": "TokenMath floor-rounding accumulation in multi-asset backing calculation systematically understates surplus",
+        "vulnerability_class": "Cross-Contract Precision Loss",
+        "affected_functions": [
+          "TokenMath.usdcL1WeiToEvm",
+          "TokenMath.spotNotionalUsdcFromPerpPx",
+          "TokenMath.spotNotionalUsdcFromSpotPx",
+          "MonetrixAccountant._readL1Backing",
+          "PrecompileReader.spotUsdcEvm"
+        ],
+        "attack_scenario": "1. MonetrixAccountant.totalBackingSigned() aggregates backing across multiple L1 assets: perp account value, spot USDC, spot hedge tokens, and PM-supplied balances. 2. Each L1\u2192EVM conversion via TokenMath.usdcL1WeiToEvm performs floor division by 100 (8dp\u21926dp), losing up to 99 wei per asset. 3. spotNotionalUsdcFromPerpPx and spotNotionalUsdcFromSpotPx also floor-divide, losing up to (divisor-1) wei per hedge token position. 4. With N tradeable assets, the cumulative rounding loss is up to N * (max_per_asset_loss). For a protocol with 10+ tradeable assets, this could be several USDC per settlement. 5. Since surplus = totalBackingSigned - usdmSupply, systematic understatement of backing means distributableSurplus is also understated. 6. Over many daily settlements, the accumulated 'lost' yield compounds \u2014 yield that was economically earned but can never be distributed. This is a cross-contract issue because TokenMath's rounding contract with Accountant's aggregation creates the emergent loss; neither contract alone has a bug.",
+        "required_preconditions": [
+          "Multiple tradeable assets are registered in vaultSupplied/multisigSupplied",
+          "L1 balances have non-zero sub-EVM-precision remainders (likely in normal operation)",
+          "The protocol runs many daily settlements, accumulating rounding dust"
+        ],
+        "estimated_severity": "low",
+        "similar_historical_cases": [
+          "Rounding dust accumulation in Balancer weighted pool BPT calculations",
+          "Floor-division dust in Convex reward distribution"
+        ],
+        "priority_score": 30.0,
+        "confidence": null,
+        "subgraph_context": null,
+        "status": "pending"
+      },
+      {
+        "id": "5fc9ebcf-3200-4ce2-b612-bd1f162b544f",
+        "audit_id": "e15aeb56-b09b-43cb-a96a-c7c5f90bf321",
+        "title": "Attack chain: Backing Inflation Cascade \u2192 Surplus Extraction \u2192 Yield Cap Bypass",
+        "vulnerability_class": "Attack Chain",
+        "affected_functions": [
+          "totalBackingSigned",
+          "_readL1Backing",
+          "distributableSurplus",
+          "surplus",
+          "settleDailyPnL",
+          "MonetrixAccountant.settleDailyPnL",
+          "MonetrixVault.distributeYield",
+          "USDM.mint"
+        ],
+        "attack_scenario": "1. The Accountant calls totalBackingSigned() which invokes _readL1Backing(). Due to H3, spot USDC held in the perp account is double-counted: once inside PRECOMPILE_ACCOUNT_MARGIN_SUMMARY (0x80F) accountValueSigned and again via explicit spotBalance (0x801). 2. Simultaneously (H2), USDC supplied to the PM pool (0x811) is double-counted: once inside accountValueSigned (which includes PM margin) and again via suppliedBalance (0x811). These two precision bugs compound, inflating the reported backing far above true equity. 3. The attacker (or a complicit operator) triggers settleDailyPnL in the same block after depositing USDC into the vault (H0's sandwich). Because totalBackingSigned is already artificially inflated by H2+H3, the computed distributableSurplus is enormous, allowing the vault to distribute far more yield than actually exists. 4. settleDailyPnL writes lastSettlementTime and totalSettledYield. When distributeYield is subsequently called (H11), it reads usdm.totalSupply() to enforce the annualized yield cap, but the supply snapshot is stale relative to the USDM that will be minted during distribution. The inflated surplus from steps 1-3 therefore passes the yield cap check, and excess USDM is minted and distributed, diluting all holders.\n\nChain steps:\n  1. totalBackingSigned / _readL1Backing: Double-count spot USDC (0x80F + 0x801) and PM-supplied USDC (0x80F + 0x811) in backing calculation \u2192 totalBackingSigned returns a value far exceeding true vault equity\n  2. settleDailyPnL: Attacker frontruns settlement with a deposit; settleDailyPnL reads the inflated backing \u2192 distributableSurplus is computed on the inflated backing, authorizing a massive yield distribution\n  3. settleDailyPnL (state write): Settlement commits lastSettlementTime and totalSettledYield to storage \u2192 Subsequent distributeYield call operates on a stale USDM supply snapshot\n  4. distributeYield / USDM.mint: Yield cap check uses stale totalSupply; excess USDM is minted \u2192 More USDM is minted than the annualized cap should allow, diluting existing holders\n\nRoot cause: Multiple double-counting bugs in _readL1Backing compound to massively inflate totalBackingSigned, which settleDailyPnL trusts to compute distributable surplus, and the resulting stale settlement state undermines the yield cap.\n\nComposed from: [3] Double-counting of spot USDC between perp account value (0x8; [2] Double-counting of supplied USDC in _readL1Backing: perp acc; [0] Distributable surplus bypass via same-block backing inflatio; [11] Accountant supply snapshot in settleDailyPnL is stale relati",
+        "required_preconditions": [],
+        "estimated_severity": "critical",
+        "similar_historical_cases": [],
+        "priority_score": 99.0,
+        "confidence": 0.7,
+        "subgraph_context": null,
+        "status": "pending"
+      },
+      {
+        "id": "1bdd2f52-cb2b-4f04-8fec-68953c6b8c05",
+        "audit_id": "e15aeb56-b09b-43cb-a96a-c7c5f90bf321",
+        "title": "Attack chain: HLP Equity Unit Mismatch \u2192 Surplus Bypass \u2192 Stale Yield Cap",
+        "vulnerability_class": "Attack Chain",
+        "affected_functions": [
+          "MonetrixAccountant._readHlpEquity",
+          "MonetrixAccountant._readL1Backing",
+          "MonetrixAccountant.totalBackingSigned",
+          "MonetrixAccountant.surplus",
+          "settleDailyPnL",
+          "totalBackingSigned",
+          "_readL1Backing",
+          "MonetrixAccountant.settleDailyPnL",
+          "MonetrixVault.distributeYield",
+          "USDM.mint"
+        ],
+        "attack_scenario": "1. _readHlpEquity() reads HLP vault equity as a raw uint64 from an 8dp L1 precompile but fails to call usdcL1WeiToEvm (\u00f7100) before adding it to the backing total (H4). This inflates the HLP component of backing by 100\u00d7. 2. totalBackingSigned() aggregates this inflated HLP value with other backing components, producing a massively overstated backing figure. 3. An attacker deposits USDC into the vault and triggers settleDailyPnL in the same block (H0's sandwich). The inflated backing from H4 causes distributableSurplus to be computed on a fictitious equity base, authorizing yield distributions that exceed real profits. 4. settleDailyPnL writes lastSettlementTime and totalSettledYield. When distributeYield executes (H11), it reads a stale usdm.totalSupply() that does not yet include the USDM about to be minted, so the annualized yield cap is effectively bypassed, and excess USDM is minted into circulation.\n\nChain steps:\n  1. _readHlpEquity / totalBackingSigned: HLP equity read omits \u00f7100 decimal conversion, inflating backing by ~100\u00d7 for HLP component \u2192 totalBackingSigned returns a grossly overstated value\n  2. settleDailyPnL: Same-block deposit-settle-withdraw sandwich exploits the inflated backing \u2192 distributableSurplus authorizes distributions far exceeding real profits\n  3. distributeYield / USDM.mint: Stale USDM supply snapshot allows yield cap bypass; excess USDM minted \u2192 USDM holders are diluted by unauthorized over-minting\n\nRoot cause: _readHlpEquity adds raw 8dp uint64 values without L1\u2192EVM decimal conversion, inflating backing; settleDailyPnL trusts this inflated value and its stale post-settlement state undermines the yield cap.\n\nComposed from: [4] HLP vault equity unit mismatch: raw uint64 added without L1\u2192; [0] Distributable surplus bypass via same-block backing inflatio; [11] Accountant supply snapshot in settleDailyPnL is stale relati",
+        "required_preconditions": [],
+        "estimated_severity": "critical",
+        "similar_historical_cases": [],
+        "priority_score": 99.0,
+        "confidence": 0.7,
+        "subgraph_context": null,
+        "status": "pending"
+      },
+      {
+        "id": "54414720-be25-4142-9e88-d5d589104559",
+        "audit_id": "e15aeb56-b09b-43cb-a96a-c7c5f90bf321",
+        "title": "Attack chain: Bridge Locked Funds \u2192 Unvalidated Execution \u2192 Inconsistent L1 Accounting",
+        "vulnerability_class": "Attack Chain",
+        "affected_functions": [
+          "bridgeYieldFromL1",
+          "_sendL1Bridge",
+          "emergencyBridgePrincipalFromL1",
+          "_sendRaw",
+          "sendBridgeToL1"
+        ],
+        "attack_scenario": "1. The vault holds USDC on L1, a significant portion of which is locked as margin for open perp positions. The operator calls bridgeYieldFromL1(amount). H6: _sendL1Bridge reads spotBalance().total, which includes margin-locked USDC, so the balance check passes even though the 'available' amount is insufficient. 2. H7: _sendL1Bridge calls _sendRaw \u2192 ICoreWriter.sendRawAction but does not validate the return value. outstandingL1Principal is decremented by `amount` before the external call, and even if the bridge action silently fails (e.g., insufficient unlocked balance on L1), the state update persists. 3. H14: Later, when pmEnabled is set to false (e.g., after a config change), emergencyBridgePrincipalFromL1 reads the now-incorrect outstandingL1Principal (artificially reduced in step 2). Because supplied assets are ignored when pmEnabled is false, the protocol's view of L1 availability is doubly wrong: outstandingL1Principal is too low AND supplied balances are excluded, leading to incorrect bridging decisions or trapped funds.\n\nChain steps:\n  1. bridgeYieldFromL1 / _sendL1Bridge: Read spotBalance().total (includes margin-locked USDC) to pass the balance check \u2192 Bridge is authorized for funds that are actually locked as margin\n  2. _sendRaw / ICoreWriter.sendRawAction: Bridge action dispatched but return value not validated; outstandingL1Principal decremented unconditionally \u2192 Protocol believes principal has been bridged even if the L1 action failed\n  3. emergencyBridgePrincipalFromL1 (with pmEnabled=false): Reads corrupted outstandingL1Principal and ignores supplied balances \u2192 Accounting is inconsistent; bridging decisions are based on incorrect L1 availability data, potentially trapping funds or allowing double-bridging\n\nRoot cause: bridgeYieldFromL1 checks total spot balance (including margin-locked funds) instead of available balance, _sendL1Bridge does not validate the bridge action's return, and outstandingL1Principal is decremented regardless, corrupting downstream accounting when pmEnabled is false.\n\nComposed from: [6] L1 balance check uses `total` instead of `total - hold`, all; [7] Unvalidated ICoreWriter.sendRawAction return allows outstand; [14] pmEnabled flag creates inconsistent L1 availability accounti",
+        "required_preconditions": [],
+        "estimated_severity": "high",
+        "similar_historical_cases": [],
+        "priority_score": 82.0,
+        "confidence": 0.7,
+        "subgraph_context": null,
+        "status": "pending"
+      },
+      {
+        "id": "8bfbbb91-e2ac-45a0-ab87-3144a3ccd986",
+        "audit_id": "e15aeb56-b09b-43cb-a96a-c7c5f90bf321",
+        "title": "Attack chain: Non-Atomic Cross-Domain Read \u2192 Surplus Manipulation via Same-Block Sandwich",
+        "vulnerability_class": "Attack Chain",
+        "affected_functions": [
+          "MonetrixAccountant.totalBackingSigned",
+          "MonetrixAccountant._readL1Backing",
+          "PrecompileReader.spotBalance",
+          "PrecompileReader.accountValueSigned",
+          "PrecompileReader.suppliedBalance",
+          "settleDailyPnL",
+          "totalBackingSigned",
+          "_readL1Backing"
+        ],
+        "attack_scenario": "1. Vault calls Accountant.settleDailyPnL. Inside totalBackingSigned(), the function first reads EVM-side USDC balances (Vault + RedeemEscrow) via standard ERC20.balanceOf (H8). 2. Between the EVM reads and the subsequent L1 precompile reads (0x801, 0x80F, 0x811), an operator (or attacker with mempool access) executes a large deposit into the vault or a redemption from escrow, changing the EVM-side balance that was already read. 3. The L1 precompile reads return values that are now inconsistent with the EVM balances captured in step 1. totalBackingSigned aggregates these mismatched values, producing a backing figure that does not reflect any real point-in-time state. 4. H0: settleDailyPnL uses this manipulated backing to compute distributableSurplus. The attacker's same-block deposit inflates the EVM component while the L1 reads haven't yet reflected the corresponding transfer, creating a transient window where backing is double-counted. The surplus is distributed as yield, extracting value from the protocol.\n\nChain steps:\n  1. totalBackingSigned (EVM reads): Read Vault and RedeemEscrow USDC balances via ERC20.balanceOf \u2192 EVM-side backing snapshot captured at time T1\n  2. Attacker interleave (deposit/redeem): Between EVM and L1 reads, attacker deposits USDC into vault or redeems from escrow \u2192 EVM balances change; L1 precompiles have not yet been read\n  3. totalBackingSigned (L1 reads): Read L1 precompiles (0x801, 0x80F, 0x811) which reflect a different state than EVM reads \u2192 Aggregated backing is inconsistent, potentially double-counting the interleaved deposit\n  4. settleDailyPnL: Compute distributableSurplus on the manipulated backing and distribute yield \u2192 Excess yield is distributed based on a backing value that never existed at a single point in time\n\nRoot cause: totalBackingSigned performs EVM ERC20.balanceOf reads and L1 precompile reads in separate steps within the same transaction, allowing an operator to manipulate the backing value between reads, which settleDailyPnL then uses to authorize excess distributions.\n\nComposed from: [8] Non-atomic L1/EVM cross-domain backing read enables surplus ; [0] Distributable surplus bypass via same-block backing inflatio",
+        "required_preconditions": [],
+        "estimated_severity": "critical",
+        "similar_historical_cases": [],
+        "priority_score": 99.0,
+        "confidence": 0.7,
+        "subgraph_context": null,
+        "status": "pending"
+      },
+      {
+        "id": "00f3a318-7c24-4e26-8903-a75523346854",
+        "audit_id": "e15aeb56-b09b-43cb-a96a-c7c5f90bf321",
+        "title": "Attack chain: Limit Order Replay \u2192 Unvalidated Action Execution \u2192 Cross-Context Bridge Replay",
+        "vulnerability_class": "Attack Chain",
+        "affected_functions": [
+          "_sendLimitOrder",
+          "emergencyBridgePrincipalFromL1",
+          "_sendL1Bridge",
+          "_sendRaw",
+          "sendBridgeToL1",
+          "bridgeYieldFromL1"
+        ],
+        "attack_scenario": "1. A user signs a limit order via _sendLimitOrder to buy asset X at price P. The signed action bytes contain no nonce field (H1). 2. After the order is legitimately executed once, an attacker re-submits the identical signed action bytes. Because there is no nonce, the contract accepts the replay. 3. The replayed action flows through _sendRaw (H7), which calls ICoreWriter.sendRawAction but does not check the return value. Even if the action fails or produces an unexpected result, the transaction continues without revert. 4. H12: If the replayed action's payload can be reinterpreted as a bridge action (due to missing domain separation in action encoding \u2014 the payload contains only ACTION_VERSION, ACTION_SEND_ASSET, token index, and amount with no context identifier), the attacker can cause the system to execute a bridge transfer that was never authorized by the original signer. This allows unauthorized extraction of USDC from the vault to an attacker-controlled L1 address.\n\nChain steps:\n  1. _sendLimitOrder: Attacker re-submits a previously executed signed limit order (no nonce check) \u2192 Contract accepts the replayed action as valid\n  2. _sendRaw / ICoreWriter.sendRawAction: Replayed action dispatched via _sendRaw; return value not validated \u2192 Even if the action produces an error or unexpected state, execution continues\n  3. sendBridgeToL1 (action encoding): Missing domain separation allows the replayed limit order bytes to be interpreted as a bridge action \u2192 Unauthorized bridge transfer executed, extracting USDC from the vault to attacker's L1 address\n\nRoot cause: Signed limit orders lack a nonce, allowing unlimited replay; the underlying _sendRaw does not validate ICoreWriter return values, and bridge actions lack domain separation, enabling replayed actions to be reinterpreted across contexts.\n\nComposed from: [1] Missing nonce in signed action enables unlimited replay of l; [7] Unvalidated ICoreWriter.sendRawAction return allows outstand; [12] Missing domain separation in bridge action encoding enables ",
+        "required_preconditions": [],
+        "estimated_severity": "high",
+        "similar_historical_cases": [],
+        "priority_score": 99.0,
+        "confidence": 0.7,
+        "subgraph_context": null,
+        "status": "pending"
+      },
+      {
+        "id": "952ca7b8-ce05-47b1-b7ed-33700b849fa8",
+        "audit_id": "e15aeb56-b09b-43cb-a96a-c7c5f90bf321",
+        "title": "Attack chain: Compounding Double-Counting \u2192 Same-Block Surplus Extraction \u2192 Floor-Distorted Backing",
+        "vulnerability_class": "Attack Chain",
+        "affected_functions": [
+          "_readL1Backing",
+          "totalBackingSigned",
+          "settleDailyPnL",
+          "distributableSurplus",
+          "surplus",
+          "totalBacking"
+        ],
+        "attack_scenario": "1. _readL1Backing aggregates backing from multiple L1 sources. H2: USDC supplied to the PM pool is counted both inside accountValueSigned (0x80F, which includes PM margin) and via suppliedBalance (0x811). H3: Spot USDC in the perp account is counted both inside accountValueSigned (0x80F) and via spotBalance (0x801). These two bugs compound \u2014 the same USDC is counted up to three times across different reads. 2. H0: Attacker detects a pending settleDailyPnL transaction and frontruns it by depositing USDC into the vault. The deposit inflates usdc.balanceOf(vault) on the EVM side. When settleDailyPnL executes, totalBackingSigned reads the inflated EVM balance plus the multiply-counted L1 balances, producing a massively overstated backing. 3. distributableSurplus is computed against this inflated backing, authorizing a yield distribution far in excess of real profits. 4. H9: If L1 perp positions simultaneously suffer large unrealized losses, totalBacking() applies a floor at zero, discarding the positive EVM USDC component. This means the reported totalBacking for other consumers (e.g., share price calculations) can be artificially depressed while settleDailyPnL used the un-floored inflated value \u2014 creating an accounting asymmetry the attacker exploits to extract value while the protocol's public-facing backing appears sound.\n\nChain steps:\n  1. _readL1Backing: Supplied USDC double-counted (0x80F + 0x811) and spot USDC double-counted (0x80F + 0x801) \u2192 Backing inflated by 2-3\u00d7 for affected components\n  2. settleDailyPnL (same-block sandwich): Attacker frontruns settlement with deposit; inflated backing read by totalBackingSigned \u2192 distributableSurplus computed on massively overstated backing\n  3. distributableSurplus / surplus: Excess yield authorized and distributed based on inflated backing \u2192 Real value extracted from the protocol as yield on fictitious profits\n  4. totalBacking (floor at zero): If L1 losses dominate, floor masks the inflation in public-facing backing queries \u2192 External observers see a normal backing value while the settlement used the inflated un-floored value, hiding the extraction\n\nRoot cause: Two independent double-counting bugs (supplied USDC and spot USDC) compound within _readL1Backing to inflate backing; settleDailyPnL's same-block sandwich exploits this, and the totalBacking() floor at zero masks the distortion when L1 losses dominate.\n\nComposed from: [2] Double-counting of supplied USDC in _readL1Backing: perp acc; [3] Double-counting of spot USDC between perp account value (0x8; [0] Distributable surplus bypass via same-block backing inflatio; [9] totalBacking() floor discards positive EVM USDC when L1 perp",
+        "required_preconditions": [],
+        "estimated_severity": "critical",
+        "similar_historical_cases": [],
+        "priority_score": 99.0,
+        "confidence": 0.7,
+        "subgraph_context": null,
+        "status": "pending"
+      }
+    ],
+    "exploits": [],
+    "validated_findings": [
+      {
+        "id": "c02fabb9-3452-48b5-8a8e-280c74c66bfd",
+        "audit_id": "e15aeb56-b09b-43cb-a96a-c7c5f90bf321",
+        "hypothesis_id": "ae4269f9-bae7-4af6-91f5-0640b9d85e55",
+        "title": "Distributable surplus bypass via same-block backing inflation (deposit-settle-withdraw sandwich)",
+        "vulnerability_class": "Temporal Snapshot Manipulation",
+        "severity": "critical",
+        "confidence": 0.0,
+        "status": "unverified",
+        "affected_functions": [
+          "settleDailyPnL",
+          "totalBackingSigned",
+          "_readL1Backing"
+        ],
+        "description": "1. Attacker detects pending settlement transaction from the vault.\n2. Attacker frontruns by depositing USDC into the vault (or redeem escrow), inflating usdc.balanceOf(vault) read by totalBackingSigned().\n3. settleDailyPnL calls distributableSurplus() which reads the inflated backing, producing a large positive surplus.\n4. Gate 3 (ds > 0) and the proposedYield <= distributable check pass against this inflated value.\n5. Yield is settled and distributed based on phantom backing that doesn't represent real protocol profit.\n6. Attacker withdraws their deposited USDC in the same block or next block.\n7. The protocol has now distributed yield it doesn't actually have, creating an insolvency condition. The invariant violated is: distributable surplus must represent genuine accumulated profit, not transient deposits.\n\n--- Consolidated attack vectors ---\n[Alt vector \u2014 Annualized cap inflated by transient totalSupply spike at se]: 1. Attacker observes pending settlement transaction in the mempool.\n2. Attacker frontruns by minting a large amount of USDM (e.g., depositing USDC to mint USDM) in the same block or immediately before settlement.\n3. settleDailyPnL executes and reads usdm.totalSupply() \u2014 the supply is now artificiall\n[Alt vector \u2014 Annualized APR cap uses mutable usdm.totalSupply() enabling ]: 1. The annualized cap formula is: cap = (usdm.totalSupply() * maxAnnualYieldBps * elapsed) / (10_000 * 365 days).\n2. usdm.totalSupply() is read at the moment settleDailyPnL is called, not at the start of the settlement period.\n3. If the Vault (or an attacker who compromises the Vault's operator key)\n[Alt vector \u2014 SWC-116: block.timestamp manipulation inflates annualized yi]: 1. Attacker is a validator/block producer (or colludes with one).\n2. Real elapsed time since lastSettlementTime is slightly above minSettlementInterval.\n3. Attacker produces a block with block.timestamp inflated by up to ~15 seconds beyond real time.\n4. Calls settleDailyPnL with a proposedYield that",
+        "poc_code": null,
+        "execution_trace": null,
+        "skeptic_notes": "Not validated: SKEPTIC_ENABLED=false.",
+        "skeptic_status": "unverified",
+        "poc_uri": "",
+        "trace_uri": "",
+        "report_uri": "",
+        "scope_flag": "out_of_scope",
+        "scope_note": "Matches a common program exclusion: MEV / sandwich / frontrunning. Verify against the program's rules.",
+        "created_at": "2026-10-15T07:12:04.510436",
+        "validated_at": null
+      },
+      {
+        "id": "4d6c5840-18f7-4ac5-ab77-9bb38df899c0",
+        "audit_id": "e15aeb56-b09b-43cb-a96a-c7c5f90bf321",
+        "hypothesis_id": "38623a95-421f-44e9-86d0-ef53beb2dbb4",
+        "title": "Missing nonce in signed action enables unlimited replay of limit orders",
+        "vulnerability_class": "Missing Nonce / Replay Protection",
+        "severity": "high",
+        "confidence": 0.0,
+        "status": "unverified",
+        "affected_functions": [
+          "_sendLimitOrder"
+        ],
+        "description": "1. User signs a limit order to buy asset X at price P via _sendLimitOrder. 2. The signed action bytes contain no nonce field. 3. After the order is executed once, an attacker (or any relayer) re-submits the identical signed action bytes. 4. Since no nonce is checked or incremented, the receiving contract accepts and executes the duplicate order. 5. This can be repeated indefinitely, draining funds or creating unwanted positions.\n\n--- Consolidated attack vectors ---\n[Alt vector \u2014 Missing deadline/validity window in signed action \u2014 orders v]: 1. User signs a limit order to buy at price P when market price is favorable. 2. The signed action contains no deadline or validUntil field. 3. Market conditions change dramatically (price crashes or spikes). 4. An attacker retrieves the old signed order (from mempool, logs, or storage) and replays \n[Alt vector \u2014 Missing domain separator (chainId + contract) enables cross-]: 1. User signs a limit order on Chain A (e.g., Arbitrum) for a specific contract instance. 2. The signed action bytes contain no chainId and no verifying contract address. 3. Attacker takes the identical signed action bytes and submits them to the same contract deployed on Chain B (e.g., a testnet or\n[Alt vector \u2014 abi.encodePacked outer wrapper lacks explicit type/length ta]: 1. Currently ACTION_VERSION and ACTION_LIMIT_ORDER are likely fixed-size constants (e.g., uint8), making the outer abi.encodePacked safe. 2. However, if ACTION_VERSION is ever changed to a variable-length type (bytes, string), the boundary between the version field and the action type field becomes ",
+        "poc_code": null,
+        "execution_trace": null,
+        "skeptic_notes": "Not validated: SKEPTIC_ENABLED=false.",
+        "skeptic_status": "unverified",
+        "poc_uri": "",
+        "trace_uri": "",
+        "report_uri": "",
+        "scope_flag": "out_of_scope",
+        "scope_note": "Matches a common program exclusion: MEV / sandwich / frontrunning. Verify against the program's rules.",
+        "created_at": "2026-10-15T07:12:04.510446",
+        "validated_at": null
+      },
+      {
+        "id": "705548b5-5bbf-4488-9094-f1b09c3e60c0",
+        "audit_id": "e15aeb56-b09b-43cb-a96a-c7c5f90bf321",
+        "hypothesis_id": "2d62d461-1e20-46df-a670-569813a22965",
+        "title": "Double-counting of supplied USDC in _readL1Backing: perp account value may already include PM-supplied margin",
+        "vulnerability_class": "Precision Loss",
+        "severity": "critical",
+        "confidence": 0.0,
+        "status": "unverified",
+        "affected_functions": [
+          "_readL1Backing",
+          "totalBackingSigned",
+          "settleDailyPnL"
+        ],
+        "description": "1. Vault supplies USDC to HyperCore PM pool (0x811). The supplied amount becomes margin for perp positions.\n2. PRECOMPILE_ACCOUNT_MARGIN_SUMMARY (0x80F) returns accountValueSigned which on Hyperliquid includes the cash/margin balance in the perp account PLUS unrealized PnL.\n3. _readL1Backing adds accountValueSigned (which includes the supplied margin) AND then adds suppliedUsdcEvm (the 0x811 supplied balance) separately.\n4. The same USDC is counted twice in totalBackingSigned \u2014 once inside the perp account value and once as a separate supplied line item.\n5. This inflates totalBackingSigned above true economic value, making surplus() and distributableSurplus() artificially high.\n6. Vault calls settleDailyPnL with a proposedYield that extracts the phantom surplus, declaring yield that doesn't exist.\n7. Yield is distributed to sUSDM stakers, diluting USDM backing below 1:1.",
+        "poc_code": null,
+        "execution_trace": null,
+        "skeptic_notes": "Not validated: SKEPTIC_ENABLED=false.",
+        "skeptic_status": "unverified",
+        "poc_uri": "",
+        "trace_uri": "",
+        "report_uri": "",
+        "scope_flag": "needs_scope_review",
+        "scope_note": "Could not map impact to an in-scope category from the description; review against the program's impacts-in-scope list.",
+        "created_at": "2026-10-15T07:12:04.510452",
+        "validated_at": null
+      },
+      {
+        "id": "3354dc17-05d5-47db-908d-d687c4d4ac61",
+        "audit_id": "e15aeb56-b09b-43cb-a96a-c7c5f90bf321",
+        "hypothesis_id": "2e787aa6-e0cd-44ad-bbd2-808824e923bb",
+        "title": "Double-counting of spot USDC between perp account value (0x80F) and explicit spot reads (0x801) inflates totalBackingSigned",
+        "vulnerability_class": "Precision Loss",
+        "severity": "critical",
+        "confidence": 0.0,
+        "status": "unverified",
+        "affected_functions": [
+          "totalBackingSigned",
+          "_readL1Backing",
+          "distributableSurplus",
+          "surplus"
+        ],
+        "description": "1. The Accountant calls totalBackingSigned() which calls _readL1Backing(vault, vaultSupplied).\n2. _readL1Backing first reads _readPerpAccountValueSigned(account) via PRECOMPILE_ACCOUNT_MARGIN_SUMMARY (0x80F). On Hyperliquid, the margin summary for cross-margin accounts includes the full account equity \u2014 spot wallet balances, supplied collateral, and unrealized perp PnL are all rolled into the signed account value.\n3. _readL1Backing then ADDITIONALLY reads _readSpotUsdcBalance(account) via PRECOMPILE_SPOT_BALANCE (0x801) and adds it to total.\n4. It then iterates suppliedList and adds suppliedBalance (0x811) for each registered slot \u2014 also already reflected in the 0x80F cross-margin equity.\n5. If 0x80F indeed includes spot and supplied balances (standard for Hyperliquid cross-margin), the same USDC is counted twice: once inside the perp account value and once as an explicit addition.\n6. This inflates totalBackingSigned, which inflates surplus(), which inflates distributableSurplus().\n7. The Vault's settleDailyPnL Gate 3 (proposedYield \u2264 distributableSurplus) would then allow yield declaration backed by phantom surplus \u2014 USDC that doesn't actually exist.\n8. An operator or attacker who can trigger settleDailyPnL could extract yield that exceeds actual protocol profits, draining the vault over time.\n\n--- Consolidated attack vectors ---\n[Alt vector \u2014 RedeemEscrow USDC double-counted with pending redemption obl]: 1. User requests redemption of USDM \u2192 Vault transfers USDC from vault to RedeemEscrow and calls addObligation(amount).\n2. totalBackingSigned() counts: `usdc.balanceOf(vault)` + `usdc.balanceOf(redeemEscrow)`.\n3. The USDC moved to RedeemEscrow is still counted in totalBacking even though it is earmar\n[Alt vector \u2014 Stale registered slot in suppliedList causes totalBackingSig]: 1. Operator registers a supplied asset slot (e.g., token index 5) via addVaultSupplied, adding it to vaultSupplied[]. 2. Later, the position is fully withdrawn from the HyperCore PM pool on L1 (balance becomes 0), but the Operator forgets to call removeVaultSupplied. 3. The HyperCore precompile for ",
+        "poc_code": null,
+        "execution_trace": null,
+        "skeptic_notes": "Not validated: SKEPTIC_ENABLED=false.",
+        "skeptic_status": "unverified",
+        "poc_uri": "",
+        "trace_uri": "",
+        "report_uri": "",
+        "scope_flag": "likely_in_scope",
+        "scope_note": "Impact maps to a high-value category (theft/freezing/insolvency). Confirm a runnable PoC \u2014 most programs require one.",
+        "created_at": "2026-10-15T07:12:04.510457",
+        "validated_at": null
+      },
+      {
+        "id": "1d72b802-ad8c-4a90-b82a-e0cb0199d6f1",
+        "audit_id": "e15aeb56-b09b-43cb-a96a-c7c5f90bf321",
+        "hypothesis_id": "fa492483-b8d4-4681-bc43-a07704268f4d",
+        "title": "HLP vault equity unit mismatch: raw uint64 added without L1\u2192EVM decimal conversion",
+        "vulnerability_class": "Precision Loss",
+        "severity": "critical",
+        "confidence": 0.0,
+        "status": "unverified",
+        "affected_functions": [
+          "MonetrixAccountant._readHlpEquity",
+          "MonetrixAccountant._readL1Backing",
+          "MonetrixAccountant.totalBackingSigned",
+          "MonetrixAccountant.surplus"
+        ],
+        "description": "1. The protocol's L1 precompiles consistently use 8dp for USDC-denominated values (spot balances, supplied balances). The code explicitly converts these via usdcL1WeiToEvm (\u00f7100) before adding to the backing total.\n2. _readHlpEquity() reads vaultEquity from the HLP_VAULT precompile (0x802) and returns the raw uint64 equity value with NO decimal conversion.\n3. If HLP vault equity is denominated in L1 8dp (consistent with other L1 precompile USDC values), it is added at 100\u00d7 its true 6dp EVM value.\n4. This inflates totalBackingSigned() by up to 99\u00d7 the actual HLP equity.\n5. surplus() = totalBackingSigned() - usdm.totalSupply() becomes massively overstated.\n6. Attacker (or keeper) calls settleDailyPnL with a proposedYield that passes Gate 3 (proposedYield \u2264 distributableSurplus) only because surplus is inflated by the unconverted HLP equity.\n7. Yield is declared and distributed from funds that don't actually exist in backing, creating an insolvent position that will be discovered when HLP is withdrawn or a redemption wave hits.",
+        "poc_code": null,
+        "execution_trace": null,
+        "skeptic_notes": "Not validated: SKEPTIC_ENABLED=false.",
+        "skeptic_status": "unverified",
+        "poc_uri": "",
+        "trace_uri": "",
+        "report_uri": "",
+        "scope_flag": "likely_in_scope",
+        "scope_note": "Impact maps to a high-value category (theft/freezing/insolvency). Confirm a runnable PoC \u2014 most programs require one.",
+        "created_at": "2026-10-15T07:12:04.510461",
+        "validated_at": null
+      },
+      {
+        "id": "cfa298a0-a26c-43cb-902f-804f5f618730",
+        "audit_id": "e15aeb56-b09b-43cb-a96a-c7c5f90bf321",
+        "hypothesis_id": "9435c404-0412-454d-8cb5-692ae2b8d150",
+        "title": "RedeemEscrow totalOwed can be set without collateralization check, enabling underfunded redemption queue",
+        "vulnerability_class": "Cross-Contract Invariant Violation",
+        "severity": "high",
+        "confidence": 0.0,
+        "status": "unverified",
+        "affected_functions": [
+          "RedeemEscrow.addObligation",
+          "RedeemEscrow.payOut",
+          "RedeemEscrow.reclaimTo",
+          "MonetrixVault.requestRedeem"
+        ],
+        "description": "1. Vault.requestRedeem calls RedeemEscrow.addObligation(amount) to record a new redemption obligation. 2. addObligation increments totalOwed WITHOUT checking whether the Escrow actually holds sufficient USDC to cover the new total. 3. If the Vault has a bug or is manipulated into calling addObligation with amounts exceeding available USDC, totalOwed exceeds the Escrow's actual balance. 4. The reclaimTo guard (bal >= amount + totalOwed) now prevents ANY reclamation because totalOwed alone exceeds bal \u2014 even though the excess obligation is phantom. 5. Meanwhile, payOut will revert on 'insufficient liquidity' for legitimate claimants. 6. The Escrow is effectively frozen: users cannot claim (no liquidity), Vault cannot reclaim (totalOwed too high). The only recovery is for someone to deposit USDC into the Escrow to cover the shortfall. This is a cross-contract issue because the invariant (totalOwed <= balance) depends on BOTH the Vault correctly funding the Escrow AND the Escrow's addObligation not verifying collateralization.",
+        "poc_code": null,
+        "execution_trace": null,
+        "skeptic_notes": "Not validated: SKEPTIC_ENABLED=false.",
+        "skeptic_status": "unverified",
+        "poc_uri": "",
+        "trace_uri": "",
+        "report_uri": "",
+        "scope_flag": "needs_scope_review",
+        "scope_note": "Could not map impact to an in-scope category from the description; review against the program's impacts-in-scope list.",
+        "created_at": "2026-10-15T07:12:04.510466",
+        "validated_at": null
+      },
+      {
+        "id": "f9e7bc4a-b40e-4e09-a398-e634ec030ccf",
+        "audit_id": "e15aeb56-b09b-43cb-a96a-c7c5f90bf321",
+        "hypothesis_id": "7eb3151f-8294-48dc-9583-c24df82bb210",
+        "title": "L1 balance check uses `total` instead of `total - hold`, allowing bridge of locked/margin funds",
+        "vulnerability_class": "SWC-115",
+        "severity": "high",
+        "confidence": 0.0,
+        "status": "unverified",
+        "affected_functions": [
+          "bridgeYieldFromL1",
+          "_sendL1Bridge"
+        ],
+        "description": "1. Operator calls bridgeYieldFromL1(amount) where amount passes the yieldShortfall() cap.\n2. _sendL1Bridge reads spotBalance(address(this), usdcToken).total \u2014 this includes USDC that is currently on hold (e.g., locked as margin for open perp positions or resting limit orders).\n3. The require(l1Available >= usdcEvmToL1Wei(amount)) passes because total (including held) exceeds the bridge amount.\n4. The ACTION_SEND_ASSET is dispatched to HyperCore via CoreWriter.\n5. HyperCore processes the bridge, withdrawing USDC from the Vault's L1 spot balance \u2014 including funds that were serving as margin.\n6. The Vault's L1 perp account is now undercollateralized because its margin was bridged away, potentially triggering forced liquidations at unfavorable prices.\n7. This violates the delta-neutrality invariant: the hedge legs remain open but the margin backing them has been extracted, creating unhedged directional exposure.\n\n--- Consolidated attack vectors ---\n[Alt vector \u2014 Cross-contract invariant gap: yieldShortfall() composes thre]: 1. Operator calls bridgeYieldFromL1(amount). 2. yieldShortfall() reads accountant.surplus(), usdc.balanceOf(), and redeemEscrow.shortfall() sequentially via separate staticcalls. 3. If a state-changing transaction in the same block (e.g., a redemption or deposit) modifies redeemEscrow.shortfall() or\n[Alt vector \u2014 No replay protection (nonce/deadline) in bridgeYieldFromL1 o]: 1. Operator's key is compromised (phishing, key leak, or malicious operator).\n2. Attacker calls bridgeYieldFromL1(amount) repeatedly with the same or varying amounts.\n3. Each call produces a valid action sent to CORE_WRITER via _sendRaw.\n4. There is no nonce that increments per bridge operation, no ",
+        "poc_code": null,
+        "execution_trace": null,
+        "skeptic_notes": "Not validated: SKEPTIC_ENABLED=false.",
+        "skeptic_status": "unverified",
+        "poc_uri": "",
+        "trace_uri": "",
+        "report_uri": "",
+        "scope_flag": "needs_scope_review",
+        "scope_note": "Could not map impact to an in-scope category from the description; review against the program's impacts-in-scope list.",
+        "created_at": "2026-10-15T07:12:04.510470",
+        "validated_at": null
+      },
+      {
+        "id": "c458c876-735e-4b77-9398-0d17d88908e6",
+        "audit_id": "e15aeb56-b09b-43cb-a96a-c7c5f90bf321",
+        "hypothesis_id": "6031e689-30e3-4bf2-9207-44bdacc78479",
+        "title": "Unvalidated ICoreWriter.sendRawAction return allows outstandingL1Principal decrement without guaranteed bridge execution",
+        "vulnerability_class": "Cross-Contract Invariant Gap",
+        "severity": "high",
+        "confidence": 0.0,
+        "status": "unverified",
+        "affected_functions": [
+          "emergencyBridgePrincipalFromL1",
+          "_sendL1Bridge",
+          "_sendRaw",
+          "sendBridgeToL1"
+        ],
+        "description": "1. Governor calls emergencyBridgePrincipalFromL1(amount). 2. outstandingL1Principal is decremented by amount (state update committed before external call). 3. _sendL1Bridge checks L1 balance via precompile staticcall (passes). 4. ActionEncoder.sendBridgeToL1 encodes the bridge action and calls _sendRaw. 5. _sendRaw calls ICoreWriter(CORE_WRITER).sendRawAction(action) with NO return value check. 6. If CORE_WRITER has been upgraded/paused/reconfigured such that sendRawAction succeeds (does not revert) but silently drops or queues the bridge action without execution, the vault's outstandingL1Principal is permanently decremented while no actual L1 bridge occurs. 7. Repeated calls could drain the accounting ledger of outstandingL1Principal without any corresponding L1 fund movement, breaking the cross-contract invariant between vault accounting and actual L1 settlement.",
+        "poc_code": null,
+        "execution_trace": null,
+        "skeptic_notes": "Not validated: SKEPTIC_ENABLED=false.",
+        "skeptic_status": "unverified",
+        "poc_uri": "",
+        "trace_uri": "",
+        "report_uri": "",
+        "scope_flag": "likely_in_scope",
+        "scope_note": "Impact maps to a high-value category (theft/freezing/insolvency). Confirm a runnable PoC \u2014 most programs require one.",
+        "created_at": "2026-10-15T07:12:04.510474",
+        "validated_at": null
+      },
+      {
+        "id": "9c00cc6e-a4c5-45a7-a9f1-1f542d4de762",
+        "audit_id": "e15aeb56-b09b-43cb-a96a-c7c5f90bf321",
+        "hypothesis_id": "78e71a68-6eca-451e-a89e-6ce62e09765c",
+        "title": "Non-atomic L1/EVM cross-domain backing read enables surplus manipulation in settleDailyPnL",
+        "vulnerability_class": "Cross-Contract Stale Read",
+        "severity": "medium",
+        "confidence": 0.0,
+        "status": "unverified",
+        "affected_functions": [
+          "MonetrixAccountant.totalBackingSigned",
+          "MonetrixAccountant._readL1Backing",
+          "PrecompileReader.spotBalance",
+          "PrecompileReader.accountValueSigned",
+          "PrecompileReader.suppliedBalance"
+        ],
+        "description": "1. Accountant.settleDailyPnL is called by Vault. 2. totalBackingSigned() begins reading EVM USDC balances (Vault + RedeemEscrow) via standard ERC20.balanceOf. 3. Between EVM reads and L1 precompile reads (0x801, 0x80F, 0x811), an operator executes L1 trades or market moves on HyperCore, changing perp account values or spot balances. 4. L1 precompile reads return post-movement values while EVM reads captured pre-movement values. 5. The composite 'total' mixes EVM snapshots from time T1 with L1 snapshots from time T2. 6. If L1 value increased (e.g., favorable trade), surplus is overstated \u2192 more yield is declared than truly earned. If L1 value decreased, yield is suppressed. An operator with L1 trading capability could time trades to inflate the backing snapshot during settlement.",
+        "poc_code": null,
+        "execution_trace": null,
+        "skeptic_notes": "Not validated: SKEPTIC_ENABLED=false.",
+        "skeptic_status": "unverified",
+        "poc_uri": "",
+        "trace_uri": "",
+        "report_uri": "",
+        "scope_flag": "below_paid_tier",
+        "scope_note": "Severity 'medium' is often below the paid tier (many programs pay only High/Critical for smart contracts). Verify program tiers.",
+        "created_at": "2026-10-15T07:12:04.510478",
+        "validated_at": null
+      },
+      {
+        "id": "07d084bf-4080-4426-9739-1d755e507a7a",
+        "audit_id": "e15aeb56-b09b-43cb-a96a-c7c5f90bf321",
+        "hypothesis_id": "fb290c8e-c4bd-407f-95b3-e7357391b899",
+        "title": "totalBacking() floor discards positive EVM USDC when L1 perp losses dominate aggregate",
+        "vulnerability_class": "Aggregation Floor Bug",
+        "severity": "medium",
+        "confidence": 0.0,
+        "status": "unverified",
+        "affected_functions": [
+          "totalBacking",
+          "totalBackingSigned",
+          "_readL1Backing"
+        ],
+        "description": "1. Protocol holds significant USDC in EVM vault (e.g., 10M USDC from recent deposits awaiting bridging to L1).\n2. Perp positions on L1 suffer large unrealized losses (e.g., -12M USDC signed account value) due to adverse price movement before hedges can be repaired.\n3. totalBackingSigned() aggregates: 10M (EVM USDC) + 5M (L1 spot) + (-12M) (perp) + 2M (supplied) + 1M (HLP) = 6M. Still positive, no issue yet.\n4. Losses deepen to -20M: aggregate = 10M + 5M + (-20M) + 2M + 1M = -2M.\n5. totalBacking() applies floor: returns 0 instead of the 18M in positive non-perp assets.\n6. Any downstream consumer (settleDailyPnL, surplus checks, peg defense) that uses totalBacking() sees 0 backing for the entire protocol, even though 18M USDC equivalent exists in non-perp venues.\n7. This could trigger false insolvency detection, block legitimate yield settlement (Gate 3: proposedYield \u2264 distributableSurplus would see zero/negative surplus), or cause unnecessary peg-defense actions.\n8. The correct behavior would be to floor only the signed perp component, not the entire aggregate, since EVM USDC and spot assets cannot go negative.",
+        "poc_code": null,
+        "execution_trace": null,
+        "skeptic_notes": "Not validated: SKEPTIC_ENABLED=false.",
+        "skeptic_status": "unverified",
+        "poc_uri": "",
+        "trace_uri": "",
+        "report_uri": "",
+        "scope_flag": "below_paid_tier",
+        "scope_note": "Severity 'medium' is often below the paid tier (many programs pay only High/Critical for smart contracts). Verify program tiers.",
+        "created_at": "2026-10-15T07:12:04.510483",
+        "validated_at": null
+      },
+      {
+        "id": "900ec67c-3a83-4161-b5c5-25890080c642",
+        "audit_id": "e15aeb56-b09b-43cb-a96a-c7c5f90bf321",
+        "hypothesis_id": "ed66e320-f6d6-4e4b-8a6d-6b566df08fd5",
+        "title": "distributeYield can be DoS'd by sUSDM.injectYield reverting when userShare exceeds maxYieldPerInjection cap",
+        "vulnerability_class": "SWC-113 (DoS)",
+        "severity": "medium",
+        "confidence": 0.0,
+        "status": "unverified",
+        "affected_functions": [
+          "distributeYield"
+        ],
+        "description": "1. Yield accumulates in YieldEscrow to a large amount (e.g., 10M USDC) over many days without distribution. 2. Governor sets maxYieldPerInjection to a conservative value (e.g., 1M USDC) as defense-in-depth. 3. Operator calls distributeYield(). totalYield = 10M. userShare = 7M (70%). 4. usdm.mint(vault, 7M) succeeds. 5. susdm.injectYield(7M) reverts because 7M > maxYieldPerInjection (1M). 6. Entire distributeYield() reverts. USDC remains in vault (pulled from escrow but the pull also reverts since the tx reverts). 7. Yield is stuck in escrow \u2014 cannot be distributed in any amount until governance raises the cap. 8. Meanwhile, stakers miss out on yield that has already been declared by the Accountant. The function has no mechanism to distribute in batches or cap userShare at maxYieldPerInjection.\n\n--- Consolidated attack vectors ---\n[Alt vector \u2014 No on-chain validation that userYieldBps + insuranceYieldBps]: 1. Governor (24h timelock) sets userYieldBps = 9000 and insuranceYieldBps = 2000 (sum = 11000 > 10000). 2. Operator calls distributeYield() with totalYield = 1e12 (1M USDC). 3. userShare = (1e12 * 9000) / 10000 = 9e11. insuranceShare = (1e12 * 2000) / 10000 = 2e11. 4. foundationShare = 1e12 - 9e11 -\n[Alt vector \u2014 Unvalidated external call to InsuranceFund.deposit() \u2014 trust]: 1. Operator calls distributeYield(). 2. Yield is pulled from escrow; userShare and insuranceShare are computed. 3. USDC is force-approved to the InsuranceFund address retrieved from config. 4. _insuranceFund.deposit(insuranceShare) is called \u2014 an external call to a contract whose implementation is n\n[Alt vector \u2014 Cross-contract state snapshot gap: susdm.totalSupply() read ]: 1. distributeYield() reads susdm.totalSupply() to decide whether userShare should be rerouted to foundation (empty-vault guard). 2. If totalSupply == 0, userShare is set to 0 and foundationShare absorbs it. 3. If totalSupply > 0, the code proceeds to mint USDM, approve susdm, and call susdm.injectYi",
+        "poc_code": null,
+        "execution_trace": null,
+        "skeptic_notes": "Not validated: SKEPTIC_ENABLED=false.",
+        "skeptic_status": "unverified",
+        "poc_uri": "",
+        "trace_uri": "",
+        "report_uri": "",
+        "scope_flag": "below_paid_tier",
+        "scope_note": "Severity 'medium' is often below the paid tier (many programs pay only High/Critical for smart contracts). Verify program tiers.",
+        "created_at": "2026-10-15T07:12:04.510487",
+        "validated_at": null
+      },
+      {
+        "id": "324ecacf-5a09-421a-8cf9-52e78021bffa",
+        "audit_id": "e15aeb56-b09b-43cb-a96a-c7c5f90bf321",
+        "hypothesis_id": "51498b79-abc3-469b-859b-134547e88cf2",
+        "title": "Accountant supply snapshot in settleDailyPnL is stale relative to Vault's subsequent USDM mint in distribution",
+        "vulnerability_class": "Cross-Contract Timing Gap",
+        "severity": "medium",
+        "confidence": 0.0,
+        "status": "unverified",
+        "affected_functions": [
+          "MonetrixAccountant.settleDailyPnL",
+          "MonetrixVault.distributeYield",
+          "USDM.mint"
+        ],
+        "description": "1. Vault calls Accountant.settleDailyPnL(proposedYield). 2. Accountant reads usdm.totalSupply() to enforce the annualized yield cap: proposedYield <= supply * maxAnnualYieldBps * deltaT / (10000 * 365 days). 3. Accountant approves and records the yield. 4. Vault proceeds to distribute: it calls usdm.mint() to mint user yield shares, increasing totalSupply. 5. If the Vault performs multiple settle+distribute cycles in rapid succession (e.g., catching up after downtime), each settlement's cap check uses the pre-mint supply from step 2, not the post-mint supply from step 4 of the previous cycle. 6. This means the annualized cap is checked against a supply that doesn't yet include previously settled yield, allowing the effective annualized rate to exceed maxAnnualYieldBps. With maxAnnualYieldBps at 1200 (12% APR), the actual rate could be marginally higher depending on settlement frequency and yield magnitude.",
+        "poc_code": null,
+        "execution_trace": null,
+        "skeptic_notes": "Not validated: SKEPTIC_ENABLED=false.",
+        "skeptic_status": "unverified",
+        "poc_uri": "",
+        "trace_uri": "",
+        "report_uri": "",
+        "scope_flag": "below_paid_tier",
+        "scope_note": "Severity 'medium' is often below the paid tier (many programs pay only High/Critical for smart contracts). Verify program tiers.",
+        "created_at": "2026-10-15T07:12:04.510491",
+        "validated_at": null
+      },
+      {
+        "id": "31c0e177-4991-4596-b89c-7fcfe61fa63e",
+        "audit_id": "e15aeb56-b09b-43cb-a96a-c7c5f90bf321",
+        "hypothesis_id": "e227a0fb-8e05-4d4f-a9dc-44bd062de5f8",
+        "title": "Missing domain separation in bridge action encoding enables cross-context replay",
+        "vulnerability_class": "Encoding - Missing Domain Separation",
+        "severity": "medium",
+        "confidence": 0.0,
+        "status": "unverified",
+        "affected_functions": [
+          "sendBridgeToL1",
+          "_sendRaw",
+          "bridgeYieldFromL1"
+        ],
+        "description": "1. Operator calls bridgeYieldFromL1(amount) on Chain A, producing action bytes via sendBridgeToL1.\n2. The action payload contains only: ACTION_VERSION, ACTION_SEND_ASSET, USDC_SYSTEM_ADDRESS, address(0), SPOT_DEX, token index, and l1Amount.\n3. No chain ID, contract address, or vault identifier is included in the encoded action.\n4. If the HyperCore CORE_WRITER processes actions across multiple chains or vault contexts, an attacker who observes the action on Chain A can submit the identical action bytes on Chain B.\n5. The action would be processed on Chain B, potentially moving USDC that was not intended to be bridged from that context.\n\n--- Consolidated attack vectors ---\n[Alt vector \u2014 address(0) recipient in encoded bridge action creates ambigu]: 1. sendBridgeToL1 encodes address(0) as the recipient (second field in abi.encode).\n2. In cross-chain bridge conventions, address(0) typically signals a burn-and-mint pattern.\n3. If the L1 side interprets address(0) literally as a transfer recipient rather than a burn signal, USDC is sent to the zer",
+        "poc_code": null,
+        "execution_trace": null,
+        "skeptic_notes": "Not validated: SKEPTIC_ENABLED=false.",
+        "skeptic_status": "unverified",
+        "poc_uri": "",
+        "trace_uri": "",
+        "report_uri": "",
+        "scope_flag": "below_paid_tier",
+        "scope_note": "Severity 'medium' is often below the paid tier (many programs pay only High/Critical for smart contracts). Verify program tiers.",
+        "created_at": "2026-10-15T07:12:04.510495",
+        "validated_at": null
+      },
+      {
+        "id": "b2556ae1-00d4-4f46-a7c8-a8793ae9d879",
+        "audit_id": "e15aeb56-b09b-43cb-a96a-c7c5f90bf321",
+        "hypothesis_id": "e9b558a9-1239-47ad-9dea-4f802bdf0380",
+        "title": "abi.encodePacked field-boundary ambiguity between ACTION_VERSION and ACTION_VAULT_TRANSFER may yield hash collisions",
+        "vulnerability_class": "SWC-133 (Hash Collision / abi.encodePacked misuse)",
+        "severity": "medium",
+        "confidence": 0.0,
+        "status": "unverified",
+        "affected_functions": [
+          "sendVaultDeposit"
+        ],
+        "description": "1. Attacker observes a signed action: abi.encodePacked(ACTION_VERSION, ACTION_VAULT_TRANSFER, abi.encode(vault, true, usdAmount)). 2. If ACTION_VERSION is a variable-length type (e.g., bytes), attacker finds an alternate split of the leading bytes into (VERSION', TRANSFER') such that VERSION' || TRANSFER' == VERSION || TRANSFER' but VERSION' != VERSION and TRANSFER' != TRANSFER. 3. The identical packed byte array is presented to the verifier, which decodes it as a different action type or version, bypassing the intended semantic commitment of the signature. 4. If _sendRaw dispatches based on a re-decoded action type, the attacker can redirect a signed vault-deposit into a different action.",
+        "poc_code": null,
+        "execution_trace": null,
+        "skeptic_notes": "Not validated: SKEPTIC_ENABLED=false.",
+        "skeptic_status": "unverified",
+        "poc_uri": "",
+        "trace_uri": "",
+        "report_uri": "",
+        "scope_flag": "below_paid_tier",
+        "scope_note": "Severity 'medium' is often below the paid tier (many programs pay only High/Critical for smart contracts). Verify program tiers.",
+        "created_at": "2026-10-15T07:12:04.510500",
+        "validated_at": null
+      },
+      {
+        "id": "156a6d00-2a44-4df7-b434-aded483a293f",
+        "audit_id": "e15aeb56-b09b-43cb-a96a-c7c5f90bf321",
+        "hypothesis_id": "8c4d4ad5-e70a-44c6-9371-b89be5762bc8",
+        "title": "pmEnabled flag creates inconsistent L1 availability accounting \u2014 supplied assets ignored when flag is false",
+        "vulnerability_class": "Missing Input Validation",
+        "severity": "low",
+        "confidence": 0.0,
+        "status": "unverified",
+        "affected_functions": [
+          "_sendL1Bridge",
+          "emergencyBridgePrincipalFromL1"
+        ],
+        "description": "1. The Vault has USDC supplied to the 0x811 Portfolio Margin pool (suppliedBalance > 0). 2. pmEnabled is set to false (e.g., due to a configuration change or initialization timing). 3. Governor calls emergencyBridgePrincipalFromL1 to bridge principal back from L1. 4. _sendL1Bridge only counts spotBalance.total, ignoring the supplied balance. 5. The require(l1Available >= usdcEvmToL1Wei(amount)) reverts even though the Vault has sufficient total L1 assets (spot + supplied). 6. This could prevent emergency withdrawal of principal when PM is disabled but funds are still supplied, creating an operational DoS for the emergency function. 7. Conversely, if pmEnabled is true but supplied funds have been withdrawn from PM (suppliedBalance = 0), the check still passes using only spot balance, which is correct but makes the pmEnabled flag misleading.",
+        "poc_code": null,
+        "execution_trace": null,
+        "skeptic_notes": "Not validated: SKEPTIC_ENABLED=false.",
+        "skeptic_status": "unverified",
+        "poc_uri": "",
+        "trace_uri": "",
+        "report_uri": "",
+        "scope_flag": "below_paid_tier",
+        "scope_note": "Severity 'low' is often below the paid tier (many programs pay only High/Critical for smart contracts). Verify program tiers.",
+        "created_at": "2026-10-15T07:12:04.510504",
+        "validated_at": null
+      },
+      {
+        "id": "b81faf15-ac69-42b2-bd54-7debc574ebdc",
+        "audit_id": "e15aeb56-b09b-43cb-a96a-c7c5f90bf321",
+        "hypothesis_id": "3e65350b-f879-495c-8a05-2f3457f1bc39",
+        "title": "Config yieldBps mutation between Vault read and distribution execution causes incorrect yield split",
+        "vulnerability_class": "Cross-Contract TOCTOU",
+        "severity": "low",
+        "confidence": 0.0,
+        "status": "unverified",
+        "affected_functions": [
+          "MonetrixVault.distributeYield",
+          "MonetrixConfig.userYieldBps",
+          "MonetrixConfig.insuranceYieldBps",
+          "MonetrixConfig.foundationYieldBps"
+        ],
+        "description": "1. Vault operator initiates yield distribution flow. 2. Vault reads userYieldBps, insuranceYieldBps from MonetrixConfig to compute the three-way split (user/insurance/foundation). 3. Between the Config read and the actual USDC transfers to InsuranceFund/foundation and USDM mint to sUSDM, a governor transaction (24h timelock) executes setYieldBps() changing the ratios. 4. The Vault distributes using stale ratios that no longer reflect governance intent. If the old ratios allocated more to foundation/insurance and new ratios reduce those shares, the distribution uses the old (higher) amounts, potentially over-distributing to those recipients. The inverse is also possible: under-distribution to users. While the 24h timelock makes this difficult to exploit in practice, a queued governance action landing in the same block as a distribution could create a measurable discrepancy.",
+        "poc_code": null,
+        "execution_trace": null,
+        "skeptic_notes": "Not validated: SKEPTIC_ENABLED=false.",
+        "skeptic_status": "unverified",
+        "poc_uri": "",
+        "trace_uri": "",
+        "report_uri": "",
+        "scope_flag": "below_paid_tier",
+        "scope_note": "Severity 'low' is often below the paid tier (many programs pay only High/Critical for smart contracts). Verify program tiers.",
+        "created_at": "2026-10-15T07:12:04.510508",
+        "validated_at": null
+      },
+      {
+        "id": "47c95a72-4408-4eeb-83d0-1e047c92b52d",
+        "audit_id": "e15aeb56-b09b-43cb-a96a-c7c5f90bf321",
+        "hypothesis_id": "3872ddbf-6b3d-476a-8d14-b08d456a5b95",
+        "title": "TokenMath floor-rounding accumulation in multi-asset backing calculation systematically understates surplus",
+        "vulnerability_class": "Cross-Contract Precision Loss",
+        "severity": "low",
+        "confidence": 0.0,
+        "status": "unverified",
+        "affected_functions": [
+          "TokenMath.usdcL1WeiToEvm",
+          "TokenMath.spotNotionalUsdcFromPerpPx",
+          "TokenMath.spotNotionalUsdcFromSpotPx",
+          "MonetrixAccountant._readL1Backing",
+          "PrecompileReader.spotUsdcEvm"
+        ],
+        "description": "1. MonetrixAccountant.totalBackingSigned() aggregates backing across multiple L1 assets: perp account value, spot USDC, spot hedge tokens, and PM-supplied balances. 2. Each L1\u2192EVM conversion via TokenMath.usdcL1WeiToEvm performs floor division by 100 (8dp\u21926dp), losing up to 99 wei per asset. 3. spotNotionalUsdcFromPerpPx and spotNotionalUsdcFromSpotPx also floor-divide, losing up to (divisor-1) wei per hedge token position. 4. With N tradeable assets, the cumulative rounding loss is up to N * (max_per_asset_loss). For a protocol with 10+ tradeable assets, this could be several USDC per settlement. 5. Since surplus = totalBackingSigned - usdmSupply, systematic understatement of backing means distributableSurplus is also understated. 6. Over many daily settlements, the accumulated 'lost' yield compounds \u2014 yield that was economically earned but can never be distributed. This is a cross-contract issue because TokenMath's rounding contract with Accountant's aggregation creates the emergent loss; neither contract alone has a bug.",
+        "poc_code": null,
+        "execution_trace": null,
+        "skeptic_notes": "Not validated: SKEPTIC_ENABLED=false.",
+        "skeptic_status": "unverified",
+        "poc_uri": "",
+        "trace_uri": "",
+        "report_uri": "",
+        "scope_flag": "below_paid_tier",
+        "scope_note": "Severity 'low' is often below the paid tier (many programs pay only High/Critical for smart contracts). Verify program tiers.",
+        "created_at": "2026-10-15T07:12:04.510512",
+        "validated_at": null
+      },
+      {
+        "id": "6e304ad7-722b-472f-9464-01a795e76705",
+        "audit_id": "e15aeb56-b09b-43cb-a96a-c7c5f90bf321",
+        "hypothesis_id": "5fc9ebcf-3200-4ce2-b612-bd1f162b544f",
+        "title": "Attack chain: Backing Inflation Cascade \u2192 Surplus Extraction \u2192 Yield Cap Bypass",
+        "vulnerability_class": "Attack Chain",
+        "severity": "critical",
+        "confidence": 0.7,
+        "status": "unverified",
+        "affected_functions": [
+          "totalBackingSigned",
+          "_readL1Backing",
+          "distributableSurplus",
+          "surplus",
+          "settleDailyPnL",
+          "MonetrixAccountant.settleDailyPnL",
+          "MonetrixVault.distributeYield",
+          "USDM.mint"
+        ],
+        "description": "1. The Accountant calls totalBackingSigned() which invokes _readL1Backing(). Due to H3, spot USDC held in the perp account is double-counted: once inside PRECOMPILE_ACCOUNT_MARGIN_SUMMARY (0x80F) accountValueSigned and again via explicit spotBalance (0x801). 2. Simultaneously (H2), USDC supplied to the PM pool (0x811) is double-counted: once inside accountValueSigned (which includes PM margin) and again via suppliedBalance (0x811). These two precision bugs compound, inflating the reported backing far above true equity. 3. The attacker (or a complicit operator) triggers settleDailyPnL in the same block after depositing USDC into the vault (H0's sandwich). Because totalBackingSigned is already artificially inflated by H2+H3, the computed distributableSurplus is enormous, allowing the vault to distribute far more yield than actually exists. 4. settleDailyPnL writes lastSettlementTime and totalSettledYield. When distributeYield is subsequently called (H11), it reads usdm.totalSupply() to enforce the annualized yield cap, but the supply snapshot is stale relative to the USDM that will be minted during distribution. The inflated surplus from steps 1-3 therefore passes the yield cap check, and excess USDM is minted and distributed, diluting all holders.\n\nChain steps:\n  1. totalBackingSigned / _readL1Backing: Double-count spot USDC (0x80F + 0x801) and PM-supplied USDC (0x80F + 0x811) in backing calculation \u2192 totalBackingSigned returns a value far exceeding true vault equity\n  2. settleDailyPnL: Attacker frontruns settlement with a deposit; settleDailyPnL reads the inflated backing \u2192 distributableSurplus is computed on the inflated backing, authorizing a massive yield distribution\n  3. settleDailyPnL (state write): Settlement commits lastSettlementTime and totalSettledYield to storage \u2192 Subsequent distributeYield call operates on a stale USDM supply snapshot\n  4. distributeYield / USDM.mint: Yield cap check uses stale totalSupply; excess USDM is minted \u2192 More USDM is minted than the annualized cap should allow, diluting existing holders\n\nRoot cause: Multiple double-counting bugs in _readL1Backing compound to massively inflate totalBackingSigned, which settleDailyPnL trusts to compute distributable surplus, and the resulting stale settlement state undermines the yield cap.\n\nComposed from: [3] Double-counting of spot USDC between perp account value (0x8; [2] Double-counting of supplied USDC in _readL1Backing: perp acc; [0] Distributable surplus bypass via same-block backing inflatio; [11] Accountant supply snapshot in settleDailyPnL is stale relati",
+        "poc_code": null,
+        "execution_trace": null,
+        "skeptic_notes": "Not validated: SKEPTIC_ENABLED=false.",
+        "skeptic_status": "unverified",
+        "poc_uri": "",
+        "trace_uri": "",
+        "report_uri": "",
+        "scope_flag": "out_of_scope",
+        "scope_note": "Matches a common program exclusion: MEV / sandwich / frontrunning. Verify against the program's rules.",
+        "created_at": "2026-10-15T07:12:04.510517",
+        "validated_at": null
+      },
+      {
+        "id": "7ab8733c-58e3-4177-b7ea-d0e05a6abc91",
+        "audit_id": "e15aeb56-b09b-43cb-a96a-c7c5f90bf321",
+        "hypothesis_id": "1bdd2f52-cb2b-4f04-8fec-68953c6b8c05",
+        "title": "Attack chain: HLP Equity Unit Mismatch \u2192 Surplus Bypass \u2192 Stale Yield Cap",
+        "vulnerability_class": "Attack Chain",
+        "severity": "critical",
+        "confidence": 0.7,
+        "status": "unverified",
+        "affected_functions": [
+          "MonetrixAccountant._readHlpEquity",
+          "MonetrixAccountant._readL1Backing",
+          "MonetrixAccountant.totalBackingSigned",
+          "MonetrixAccountant.surplus",
+          "settleDailyPnL",
+          "totalBackingSigned",
+          "_readL1Backing",
+          "MonetrixAccountant.settleDailyPnL",
+          "MonetrixVault.distributeYield",
+          "USDM.mint"
+        ],
+        "description": "1. _readHlpEquity() reads HLP vault equity as a raw uint64 from an 8dp L1 precompile but fails to call usdcL1WeiToEvm (\u00f7100) before adding it to the backing total (H4). This inflates the HLP component of backing by 100\u00d7. 2. totalBackingSigned() aggregates this inflated HLP value with other backing components, producing a massively overstated backing figure. 3. An attacker deposits USDC into the vault and triggers settleDailyPnL in the same block (H0's sandwich). The inflated backing from H4 causes distributableSurplus to be computed on a fictitious equity base, authorizing yield distributions that exceed real profits. 4. settleDailyPnL writes lastSettlementTime and totalSettledYield. When distributeYield executes (H11), it reads a stale usdm.totalSupply() that does not yet include the USDM about to be minted, so the annualized yield cap is effectively bypassed, and excess USDM is minted into circulation.\n\nChain steps:\n  1. _readHlpEquity / totalBackingSigned: HLP equity read omits \u00f7100 decimal conversion, inflating backing by ~100\u00d7 for HLP component \u2192 totalBackingSigned returns a grossly overstated value\n  2. settleDailyPnL: Same-block deposit-settle-withdraw sandwich exploits the inflated backing \u2192 distributableSurplus authorizes distributions far exceeding real profits\n  3. distributeYield / USDM.mint: Stale USDM supply snapshot allows yield cap bypass; excess USDM minted \u2192 USDM holders are diluted by unauthorized over-minting\n\nRoot cause: _readHlpEquity adds raw 8dp uint64 values without L1\u2192EVM decimal conversion, inflating backing; settleDailyPnL trusts this inflated value and its stale post-settlement state undermines the yield cap.\n\nComposed from: [4] HLP vault equity unit mismatch: raw uint64 added without L1\u2192; [0] Distributable surplus bypass via same-block backing inflatio; [11] Accountant supply snapshot in settleDailyPnL is stale relati",
+        "poc_code": null,
+        "execution_trace": null,
+        "skeptic_notes": "Not validated: SKEPTIC_ENABLED=false.",
+        "skeptic_status": "unverified",
+        "poc_uri": "",
+        "trace_uri": "",
+        "report_uri": "",
+        "scope_flag": "out_of_scope",
+        "scope_note": "Matches a common program exclusion: MEV / sandwich / frontrunning. Verify against the program's rules.",
+        "created_at": "2026-10-15T07:12:04.510521",
+        "validated_at": null
+      },
+      {
+        "id": "3504473f-9062-4c29-bd40-a4d42dc6108d",
+        "audit_id": "e15aeb56-b09b-43cb-a96a-c7c5f90bf321",
+        "hypothesis_id": "54414720-be25-4142-9e88-d5d589104559",
+        "title": "Attack chain: Bridge Locked Funds \u2192 Unvalidated Execution \u2192 Inconsistent L1 Accounting",
+        "vulnerability_class": "Attack Chain",
+        "severity": "high",
+        "confidence": 0.7,
+        "status": "unverified",
+        "affected_functions": [
+          "bridgeYieldFromL1",
+          "_sendL1Bridge",
+          "emergencyBridgePrincipalFromL1",
+          "_sendRaw",
+          "sendBridgeToL1"
+        ],
+        "description": "1. The vault holds USDC on L1, a significant portion of which is locked as margin for open perp positions. The operator calls bridgeYieldFromL1(amount). H6: _sendL1Bridge reads spotBalance().total, which includes margin-locked USDC, so the balance check passes even though the 'available' amount is insufficient. 2. H7: _sendL1Bridge calls _sendRaw \u2192 ICoreWriter.sendRawAction but does not validate the return value. outstandingL1Principal is decremented by `amount` before the external call, and even if the bridge action silently fails (e.g., insufficient unlocked balance on L1), the state update persists. 3. H14: Later, when pmEnabled is set to false (e.g., after a config change), emergencyBridgePrincipalFromL1 reads the now-incorrect outstandingL1Principal (artificially reduced in step 2). Because supplied assets are ignored when pmEnabled is false, the protocol's view of L1 availability is doubly wrong: outstandingL1Principal is too low AND supplied balances are excluded, leading to incorrect bridging decisions or trapped funds.\n\nChain steps:\n  1. bridgeYieldFromL1 / _sendL1Bridge: Read spotBalance().total (includes margin-locked USDC) to pass the balance check \u2192 Bridge is authorized for funds that are actually locked as margin\n  2. _sendRaw / ICoreWriter.sendRawAction: Bridge action dispatched but return value not validated; outstandingL1Principal decremented unconditionally \u2192 Protocol believes principal has been bridged even if the L1 action failed\n  3. emergencyBridgePrincipalFromL1 (with pmEnabled=false): Reads corrupted outstandingL1Principal and ignores supplied balances \u2192 Accounting is inconsistent; bridging decisions are based on incorrect L1 availability data, potentially trapping funds or allowing double-bridging\n\nRoot cause: bridgeYieldFromL1 checks total spot balance (including margin-locked funds) instead of available balance, _sendL1Bridge does not validate the bridge action's return, and outstandingL1Principal is decremented regardless, corrupting downstream accounting when pmEnabled is false.\n\nComposed from: [6] L1 balance check uses `total` instead of `total - hold`, all; [7] Unvalidated ICoreWriter.sendRawAction return allows outstand; [14] pmEnabled flag creates inconsistent L1 availability accounti",
+        "poc_code": null,
+        "execution_trace": null,
+        "skeptic_notes": "Not validated: SKEPTIC_ENABLED=false.",
+        "skeptic_status": "unverified",
+        "poc_uri": "",
+        "trace_uri": "",
+        "report_uri": "",
+        "scope_flag": "needs_scope_review",
+        "scope_note": "Could not map impact to an in-scope category from the description; review against the program's impacts-in-scope list.",
+        "created_at": "2026-10-15T07:12:04.510525",
+        "validated_at": null
+      },
+      {
+        "id": "e7747f31-5925-4cb8-83e9-cff1ce832f37",
+        "audit_id": "e15aeb56-b09b-43cb-a96a-c7c5f90bf321",
+        "hypothesis_id": "8bfbbb91-e2ac-45a0-ab87-3144a3ccd986",
+        "title": "Attack chain: Non-Atomic Cross-Domain Read \u2192 Surplus Manipulation via Same-Block Sandwich",
+        "vulnerability_class": "Attack Chain",
+        "severity": "critical",
+        "confidence": 0.7,
+        "status": "unverified",
+        "affected_functions": [
+          "MonetrixAccountant.totalBackingSigned",
+          "MonetrixAccountant._readL1Backing",
+          "PrecompileReader.spotBalance",
+          "PrecompileReader.accountValueSigned",
+          "PrecompileReader.suppliedBalance",
+          "settleDailyPnL",
+          "totalBackingSigned",
+          "_readL1Backing"
+        ],
+        "description": "1. Vault calls Accountant.settleDailyPnL. Inside totalBackingSigned(), the function first reads EVM-side USDC balances (Vault + RedeemEscrow) via standard ERC20.balanceOf (H8). 2. Between the EVM reads and the subsequent L1 precompile reads (0x801, 0x80F, 0x811), an operator (or attacker with mempool access) executes a large deposit into the vault or a redemption from escrow, changing the EVM-side balance that was already read. 3. The L1 precompile reads return values that are now inconsistent with the EVM balances captured in step 1. totalBackingSigned aggregates these mismatched values, producing a backing figure that does not reflect any real point-in-time state. 4. H0: settleDailyPnL uses this manipulated backing to compute distributableSurplus. The attacker's same-block deposit inflates the EVM component while the L1 reads haven't yet reflected the corresponding transfer, creating a transient window where backing is double-counted. The surplus is distributed as yield, extracting value from the protocol.\n\nChain steps:\n  1. totalBackingSigned (EVM reads): Read Vault and RedeemEscrow USDC balances via ERC20.balanceOf \u2192 EVM-side backing snapshot captured at time T1\n  2. Attacker interleave (deposit/redeem): Between EVM and L1 reads, attacker deposits USDC into vault or redeems from escrow \u2192 EVM balances change; L1 precompiles have not yet been read\n  3. totalBackingSigned (L1 reads): Read L1 precompiles (0x801, 0x80F, 0x811) which reflect a different state than EVM reads \u2192 Aggregated backing is inconsistent, potentially double-counting the interleaved deposit\n  4. settleDailyPnL: Compute distributableSurplus on the manipulated backing and distribute yield \u2192 Excess yield is distributed based on a backing value that never existed at a single point in time\n\nRoot cause: totalBackingSigned performs EVM ERC20.balanceOf reads and L1 precompile reads in separate steps within the same transaction, allowing an operator to manipulate the backing value between reads, which settleDailyPnL then uses to authorize excess distributions.\n\nComposed from: [8] Non-atomic L1/EVM cross-domain backing read enables surplus ; [0] Distributable surplus bypass via same-block backing inflatio",
+        "poc_code": null,
+        "execution_trace": null,
+        "skeptic_notes": "Not validated: SKEPTIC_ENABLED=false.",
+        "skeptic_status": "unverified",
+        "poc_uri": "",
+        "trace_uri": "",
+        "report_uri": "",
+        "scope_flag": "out_of_scope",
+        "scope_note": "Matches a common program exclusion: MEV / sandwich / frontrunning. Verify against the program's rules.",
+        "created_at": "2026-10-15T07:12:04.510529",
+        "validated_at": null
+      },
+      {
+        "id": "6a50cec1-cf16-4935-b333-37fed0b20fca",
+        "audit_id": "e15aeb56-b09b-43cb-a96a-c7c5f90bf321",
+        "hypothesis_id": "00f3a318-7c24-4e26-8903-a75523346854",
+        "title": "Attack chain: Limit Order Replay \u2192 Unvalidated Action Execution \u2192 Cross-Context Bridge Replay",
+        "vulnerability_class": "Attack Chain",
+        "severity": "high",
+        "confidence": 0.7,
+        "status": "unverified",
+        "affected_functions": [
+          "_sendLimitOrder",
+          "emergencyBridgePrincipalFromL1",
+          "_sendL1Bridge",
+          "_sendRaw",
+          "sendBridgeToL1",
+          "bridgeYieldFromL1"
+        ],
+        "description": "1. A user signs a limit order via _sendLimitOrder to buy asset X at price P. The signed action bytes contain no nonce field (H1). 2. After the order is legitimately executed once, an attacker re-submits the identical signed action bytes. Because there is no nonce, the contract accepts the replay. 3. The replayed action flows through _sendRaw (H7), which calls ICoreWriter.sendRawAction but does not check the return value. Even if the action fails or produces an unexpected result, the transaction continues without revert. 4. H12: If the replayed action's payload can be reinterpreted as a bridge action (due to missing domain separation in action encoding \u2014 the payload contains only ACTION_VERSION, ACTION_SEND_ASSET, token index, and amount with no context identifier), the attacker can cause the system to execute a bridge transfer that was never authorized by the original signer. This allows unauthorized extraction of USDC from the vault to an attacker-controlled L1 address.\n\nChain steps:\n  1. _sendLimitOrder: Attacker re-submits a previously executed signed limit order (no nonce check) \u2192 Contract accepts the replayed action as valid\n  2. _sendRaw / ICoreWriter.sendRawAction: Replayed action dispatched via _sendRaw; return value not validated \u2192 Even if the action produces an error or unexpected state, execution continues\n  3. sendBridgeToL1 (action encoding): Missing domain separation allows the replayed limit order bytes to be interpreted as a bridge action \u2192 Unauthorized bridge transfer executed, extracting USDC from the vault to attacker's L1 address\n\nRoot cause: Signed limit orders lack a nonce, allowing unlimited replay; the underlying _sendRaw does not validate ICoreWriter return values, and bridge actions lack domain separation, enabling replayed actions to be reinterpreted across contexts.\n\nComposed from: [1] Missing nonce in signed action enables unlimited replay of l; [7] Unvalidated ICoreWriter.sendRawAction return allows outstand; [12] Missing domain separation in bridge action encoding enables ",
+        "poc_code": null,
+        "execution_trace": null,
+        "skeptic_notes": "Not validated: SKEPTIC_ENABLED=false.",
+        "skeptic_status": "unverified",
+        "poc_uri": "",
+        "trace_uri": "",
+        "report_uri": "",
+        "scope_flag": "known_issue",
+        "scope_note": "Strong overlap with the project's declared known-issues section.",
+        "created_at": "2026-10-15T07:12:04.510534",
+        "validated_at": null
+      },
+      {
+        "id": "cb9579f3-fe61-4227-9945-4591af61c89a",
+        "audit_id": "e15aeb56-b09b-43cb-a96a-c7c5f90bf321",
+        "hypothesis_id": "952ca7b8-ce05-47b1-b7ed-33700b849fa8",
+        "title": "Attack chain: Compounding Double-Counting \u2192 Same-Block Surplus Extraction \u2192 Floor-Distorted Backing",
+        "vulnerability_class": "Attack Chain",
+        "severity": "critical",
+        "confidence": 0.7,
+        "status": "unverified",
+        "affected_functions": [
+          "_readL1Backing",
+          "totalBackingSigned",
+          "settleDailyPnL",
+          "distributableSurplus",
+          "surplus",
+          "totalBacking"
+        ],
+        "description": "1. _readL1Backing aggregates backing from multiple L1 sources. H2: USDC supplied to the PM pool is counted both inside accountValueSigned (0x80F, which includes PM margin) and via suppliedBalance (0x811). H3: Spot USDC in the perp account is counted both inside accountValueSigned (0x80F) and via spotBalance (0x801). These two bugs compound \u2014 the same USDC is counted up to three times across different reads. 2. H0: Attacker detects a pending settleDailyPnL transaction and frontruns it by depositing USDC into the vault. The deposit inflates usdc.balanceOf(vault) on the EVM side. When settleDailyPnL executes, totalBackingSigned reads the inflated EVM balance plus the multiply-counted L1 balances, producing a massively overstated backing. 3. distributableSurplus is computed against this inflated backing, authorizing a yield distribution far in excess of real profits. 4. H9: If L1 perp positions simultaneously suffer large unrealized losses, totalBacking() applies a floor at zero, discarding the positive EVM USDC component. This means the reported totalBacking for other consumers (e.g., share price calculations) can be artificially depressed while settleDailyPnL used the un-floored inflated value \u2014 creating an accounting asymmetry the attacker exploits to extract value while the protocol's public-facing backing appears sound.\n\nChain steps:\n  1. _readL1Backing: Supplied USDC double-counted (0x80F + 0x811) and spot USDC double-counted (0x80F + 0x801) \u2192 Backing inflated by 2-3\u00d7 for affected components\n  2. settleDailyPnL (same-block sandwich): Attacker frontruns settlement with deposit; inflated backing read by totalBackingSigned \u2192 distributableSurplus computed on massively overstated backing\n  3. distributableSurplus / surplus: Excess yield authorized and distributed based on inflated backing \u2192 Real value extracted from the protocol as yield on fictitious profits\n  4. totalBacking (floor at zero): If L1 losses dominate, floor masks the inflation in public-facing backing queries \u2192 External observers see a normal backing value while the settlement used the inflated un-floored value, hiding the extraction\n\nRoot cause: Two independent double-counting bugs (supplied USDC and spot USDC) compound within _readL1Backing to inflate backing; settleDailyPnL's same-block sandwich exploits this, and the totalBacking() floor at zero masks the distortion when L1 losses dominate.\n\nComposed from: [2] Double-counting of supplied USDC in _readL1Backing: perp acc; [3] Double-counting of spot USDC between perp account value (0x8; [0] Distributable surplus bypass via same-block backing inflatio; [9] totalBacking() floor discards positive EVM USDC when L1 perp",
+        "poc_code": null,
+        "execution_trace": null,
+        "skeptic_notes": "Not validated: SKEPTIC_ENABLED=false.",
+        "skeptic_status": "unverified",
+        "poc_uri": "",
+        "trace_uri": "",
+        "report_uri": "",
+        "scope_flag": "out_of_scope",
+        "scope_note": "Matches a common program exclusion: MEV / sandwich / frontrunning. Verify against the program's rules.",
+        "created_at": "2026-10-15T07:12:04.510538",
+        "validated_at": null
+      }
+    ],
+    "chains": [
+      {
+        "id": "a6f00628-ea00-46bb-aafd-822e1b3bb03f",
+        "audit_id": "e15aeb56-b09b-43cb-a96a-c7c5f90bf321",
+        "title": "Backing Inflation Cascade \u2192 Surplus Extraction \u2192 Yield Cap Bypass",
+        "steps": [
+          {
+            "order": 1,
+            "hypothesis_id": "2e787aa6-e0cd-44ad-bbd2-808824e923bb",
+            "function": "totalBackingSigned / _readL1Backing",
+            "action": "Double-count spot USDC (0x80F + 0x801) and PM-supplied USDC (0x80F + 0x811) in backing calculation",
+            "effect": "totalBackingSigned returns a value far exceeding true vault equity"
+          },
+          {
+            "order": 2,
+            "hypothesis_id": "2d62d461-1e20-46df-a670-569813a22965",
+            "function": "settleDailyPnL",
+            "action": "Attacker frontruns settlement with a deposit; settleDailyPnL reads the inflated backing",
+            "effect": "distributableSurplus is computed on the inflated backing, authorizing a massive yield distribution"
+          },
+          {
+            "order": 3,
+            "hypothesis_id": "ae4269f9-bae7-4af6-91f5-0640b9d85e55",
+            "function": "settleDailyPnL (state write)",
+            "action": "Settlement commits lastSettlementTime and totalSettledYield to storage",
+            "effect": "Subsequent distributeYield call operates on a stale USDM supply snapshot"
+          },
+          {
+            "order": 4,
+            "hypothesis_id": "51498b79-abc3-469b-859b-134547e88cf2",
+            "function": "distributeYield / USDM.mint",
+            "action": "Yield cap check uses stale totalSupply; excess USDM is minted",
+            "effect": "More USDM is minted than the annualized cap should allow, diluting existing holders"
+          }
+        ],
+        "combined_severity": "critical",
+        "combined_scenario": "1. The Accountant calls totalBackingSigned() which invokes _readL1Backing(). Due to H3, spot USDC held in the perp account is double-counted: once inside PRECOMPILE_ACCOUNT_MARGIN_SUMMARY (0x80F) accountValueSigned and again via explicit spotBalance (0x801). 2. Simultaneously (H2), USDC supplied to the PM pool (0x811) is double-counted: once inside accountValueSigned (which includes PM margin) and again via suppliedBalance (0x811). These two precision bugs compound, inflating the reported backing far above true equity. 3. The attacker (or a complicit operator) triggers settleDailyPnL in the same block after depositing USDC into the vault (H0's sandwich). Because totalBackingSigned is already artificially inflated by H2+H3, the computed distributableSurplus is enormous, allowing the vault to distribute far more yield than actually exists. 4. settleDailyPnL writes lastSettlementTime and totalSettledYield. When distributeYield is subsequently called (H11), it reads usdm.totalSupply() to enforce the annualized yield cap, but the supply snapshot is stale relative to the USDM that will be minted during distribution. The inflated surplus from steps 1-3 therefore passes the yield cap check, and excess USDM is minted and distributed, diluting all holders.",
+        "root_cause": "Multiple double-counting bugs in _readL1Backing compound to massively inflate totalBackingSigned, which settleDailyPnL trusts to compute distributable surplus, and the resulting stale settlement state undermines the yield cap.",
+        "component_hypothesis_ids": [
+          "2e787aa6-e0cd-44ad-bbd2-808824e923bb",
+          "2d62d461-1e20-46df-a670-569813a22965",
+          "ae4269f9-bae7-4af6-91f5-0640b9d85e55",
+          "51498b79-abc3-469b-859b-134547e88cf2"
+        ],
+        "affected_functions": [
+          "totalBackingSigned",
+          "_readL1Backing",
+          "distributableSurplus",
+          "surplus",
+          "settleDailyPnL",
+          "MonetrixAccountant.settleDailyPnL",
+          "MonetrixVault.distributeYield",
+          "USDM.mint"
+        ],
+        "priority_score": 99.0
+      },
+      {
+        "id": "3c2d7447-f05d-475d-a68a-525af120d8ea",
+        "audit_id": "e15aeb56-b09b-43cb-a96a-c7c5f90bf321",
+        "title": "HLP Equity Unit Mismatch \u2192 Surplus Bypass \u2192 Stale Yield Cap",
+        "steps": [
+          {
+            "order": 1,
+            "hypothesis_id": "fa492483-b8d4-4681-bc43-a07704268f4d",
+            "function": "_readHlpEquity / totalBackingSigned",
+            "action": "HLP equity read omits \u00f7100 decimal conversion, inflating backing by ~100\u00d7 for HLP component",
+            "effect": "totalBackingSigned returns a grossly overstated value"
+          },
+          {
+            "order": 2,
+            "hypothesis_id": "ae4269f9-bae7-4af6-91f5-0640b9d85e55",
+            "function": "settleDailyPnL",
+            "action": "Same-block deposit-settle-withdraw sandwich exploits the inflated backing",
+            "effect": "distributableSurplus authorizes distributions far exceeding real profits"
+          },
+          {
+            "order": 3,
+            "hypothesis_id": "51498b79-abc3-469b-859b-134547e88cf2",
+            "function": "distributeYield / USDM.mint",
+            "action": "Stale USDM supply snapshot allows yield cap bypass; excess USDM minted",
+            "effect": "USDM holders are diluted by unauthorized over-minting"
+          }
+        ],
+        "combined_severity": "critical",
+        "combined_scenario": "1. _readHlpEquity() reads HLP vault equity as a raw uint64 from an 8dp L1 precompile but fails to call usdcL1WeiToEvm (\u00f7100) before adding it to the backing total (H4). This inflates the HLP component of backing by 100\u00d7. 2. totalBackingSigned() aggregates this inflated HLP value with other backing components, producing a massively overstated backing figure. 3. An attacker deposits USDC into the vault and triggers settleDailyPnL in the same block (H0's sandwich). The inflated backing from H4 causes distributableSurplus to be computed on a fictitious equity base, authorizing yield distributions that exceed real profits. 4. settleDailyPnL writes lastSettlementTime and totalSettledYield. When distributeYield executes (H11), it reads a stale usdm.totalSupply() that does not yet include the USDM about to be minted, so the annualized yield cap is effectively bypassed, and excess USDM is minted into circulation.",
+        "root_cause": "_readHlpEquity adds raw 8dp uint64 values without L1\u2192EVM decimal conversion, inflating backing; settleDailyPnL trusts this inflated value and its stale post-settlement state undermines the yield cap.",
+        "component_hypothesis_ids": [
+          "fa492483-b8d4-4681-bc43-a07704268f4d",
+          "ae4269f9-bae7-4af6-91f5-0640b9d85e55",
+          "51498b79-abc3-469b-859b-134547e88cf2"
+        ],
+        "affected_functions": [
+          "MonetrixAccountant._readHlpEquity",
+          "MonetrixAccountant._readL1Backing",
+          "MonetrixAccountant.totalBackingSigned",
+          "MonetrixAccountant.surplus",
+          "settleDailyPnL",
+          "totalBackingSigned",
+          "_readL1Backing",
+          "MonetrixAccountant.settleDailyPnL",
+          "MonetrixVault.distributeYield",
+          "USDM.mint"
+        ],
+        "priority_score": 99.0
+      },
+      {
+        "id": "6e06c49a-1cd4-4c09-8dcd-6dbe3c38b2c7",
+        "audit_id": "e15aeb56-b09b-43cb-a96a-c7c5f90bf321",
+        "title": "Bridge Locked Funds \u2192 Unvalidated Execution \u2192 Inconsistent L1 Accounting",
+        "steps": [
+          {
+            "order": 1,
+            "hypothesis_id": "7eb3151f-8294-48dc-9583-c24df82bb210",
+            "function": "bridgeYieldFromL1 / _sendL1Bridge",
+            "action": "Read spotBalance().total (includes margin-locked USDC) to pass the balance check",
+            "effect": "Bridge is authorized for funds that are actually locked as margin"
+          },
+          {
+            "order": 2,
+            "hypothesis_id": "6031e689-30e3-4bf2-9207-44bdacc78479",
+            "function": "_sendRaw / ICoreWriter.sendRawAction",
+            "action": "Bridge action dispatched but return value not validated; outstandingL1Principal decremented unconditionally",
+            "effect": "Protocol believes principal has been bridged even if the L1 action failed"
+          },
+          {
+            "order": 3,
+            "hypothesis_id": "8c4d4ad5-e70a-44c6-9371-b89be5762bc8",
+            "function": "emergencyBridgePrincipalFromL1 (with pmEnabled=false)",
+            "action": "Reads corrupted outstandingL1Principal and ignores supplied balances",
+            "effect": "Accounting is inconsistent; bridging decisions are based on incorrect L1 availability data, potentially trapping funds or allowing double-bridging"
+          }
+        ],
+        "combined_severity": "high",
+        "combined_scenario": "1. The vault holds USDC on L1, a significant portion of which is locked as margin for open perp positions. The operator calls bridgeYieldFromL1(amount). H6: _sendL1Bridge reads spotBalance().total, which includes margin-locked USDC, so the balance check passes even though the 'available' amount is insufficient. 2. H7: _sendL1Bridge calls _sendRaw \u2192 ICoreWriter.sendRawAction but does not validate the return value. outstandingL1Principal is decremented by `amount` before the external call, and even if the bridge action silently fails (e.g., insufficient unlocked balance on L1), the state update persists. 3. H14: Later, when pmEnabled is set to false (e.g., after a config change), emergencyBridgePrincipalFromL1 reads the now-incorrect outstandingL1Principal (artificially reduced in step 2). Because supplied assets are ignored when pmEnabled is false, the protocol's view of L1 availability is doubly wrong: outstandingL1Principal is too low AND supplied balances are excluded, leading to incorrect bridging decisions or trapped funds.",
+        "root_cause": "bridgeYieldFromL1 checks total spot balance (including margin-locked funds) instead of available balance, _sendL1Bridge does not validate the bridge action's return, and outstandingL1Principal is decremented regardless, corrupting downstream accounting when pmEnabled is false.",
+        "component_hypothesis_ids": [
+          "7eb3151f-8294-48dc-9583-c24df82bb210",
+          "6031e689-30e3-4bf2-9207-44bdacc78479",
+          "8c4d4ad5-e70a-44c6-9371-b89be5762bc8"
+        ],
+        "affected_functions": [
+          "bridgeYieldFromL1",
+          "_sendL1Bridge",
+          "emergencyBridgePrincipalFromL1",
+          "_sendRaw",
+          "sendBridgeToL1"
+        ],
+        "priority_score": 82.0
+      },
+      {
+        "id": "9ef7f150-dc24-45d0-b898-b804659c2dd7",
+        "audit_id": "e15aeb56-b09b-43cb-a96a-c7c5f90bf321",
+        "title": "Non-Atomic Cross-Domain Read \u2192 Surplus Manipulation via Same-Block Sandwich",
+        "steps": [
+          {
+            "order": 1,
+            "hypothesis_id": "78e71a68-6eca-451e-a89e-6ce62e09765c",
+            "function": "totalBackingSigned (EVM reads)",
+            "action": "Read Vault and RedeemEscrow USDC balances via ERC20.balanceOf",
+            "effect": "EVM-side backing snapshot captured at time T1"
+          },
+          {
+            "order": 2,
+            "hypothesis_id": "ae4269f9-bae7-4af6-91f5-0640b9d85e55",
+            "function": "Attacker interleave (deposit/redeem)",
+            "action": "Between EVM and L1 reads, attacker deposits USDC into vault or redeems from escrow",
+            "effect": "EVM balances change; L1 precompiles have not yet been read"
+          },
+          {
+            "order": 3,
+            "hypothesis_id": null,
+            "function": "totalBackingSigned (L1 reads)",
+            "action": "Read L1 precompiles (0x801, 0x80F, 0x811) which reflect a different state than EVM reads",
+            "effect": "Aggregated backing is inconsistent, potentially double-counting the interleaved deposit"
+          },
+          {
+            "order": 4,
+            "hypothesis_id": null,
+            "function": "settleDailyPnL",
+            "action": "Compute distributableSurplus on the manipulated backing and distribute yield",
+            "effect": "Excess yield is distributed based on a backing value that never existed at a single point in time"
+          }
+        ],
+        "combined_severity": "critical",
+        "combined_scenario": "1. Vault calls Accountant.settleDailyPnL. Inside totalBackingSigned(), the function first reads EVM-side USDC balances (Vault + RedeemEscrow) via standard ERC20.balanceOf (H8). 2. Between the EVM reads and the subsequent L1 precompile reads (0x801, 0x80F, 0x811), an operator (or attacker with mempool access) executes a large deposit into the vault or a redemption from escrow, changing the EVM-side balance that was already read. 3. The L1 precompile reads return values that are now inconsistent with the EVM balances captured in step 1. totalBackingSigned aggregates these mismatched values, producing a backing figure that does not reflect any real point-in-time state. 4. H0: settleDailyPnL uses this manipulated backing to compute distributableSurplus. The attacker's same-block deposit inflates the EVM component while the L1 reads haven't yet reflected the corresponding transfer, creating a transient window where backing is double-counted. The surplus is distributed as yield, extracting value from the protocol.",
+        "root_cause": "totalBackingSigned performs EVM ERC20.balanceOf reads and L1 precompile reads in separate steps within the same transaction, allowing an operator to manipulate the backing value between reads, which settleDailyPnL then uses to authorize excess distributions.",
+        "component_hypothesis_ids": [
+          "78e71a68-6eca-451e-a89e-6ce62e09765c",
+          "ae4269f9-bae7-4af6-91f5-0640b9d85e55"
+        ],
+        "affected_functions": [
+          "MonetrixAccountant.totalBackingSigned",
+          "MonetrixAccountant._readL1Backing",
+          "PrecompileReader.spotBalance",
+          "PrecompileReader.accountValueSigned",
+          "PrecompileReader.suppliedBalance",
+          "settleDailyPnL",
+          "totalBackingSigned",
+          "_readL1Backing"
+        ],
+        "priority_score": 99.0
+      },
+      {
+        "id": "dd354720-8f6f-4c79-83bd-8c086ad2daae",
+        "audit_id": "e15aeb56-b09b-43cb-a96a-c7c5f90bf321",
+        "title": "Limit Order Replay \u2192 Unvalidated Action Execution \u2192 Cross-Context Bridge Replay",
+        "steps": [
+          {
+            "order": 1,
+            "hypothesis_id": "38623a95-421f-44e9-86d0-ef53beb2dbb4",
+            "function": "_sendLimitOrder",
+            "action": "Attacker re-submits a previously executed signed limit order (no nonce check)",
+            "effect": "Contract accepts the replayed action as valid"
+          },
+          {
+            "order": 2,
+            "hypothesis_id": "6031e689-30e3-4bf2-9207-44bdacc78479",
+            "function": "_sendRaw / ICoreWriter.sendRawAction",
+            "action": "Replayed action dispatched via _sendRaw; return value not validated",
+            "effect": "Even if the action produces an error or unexpected state, execution continues"
+          },
+          {
+            "order": 3,
+            "hypothesis_id": "e227a0fb-8e05-4d4f-a9dc-44bd062de5f8",
+            "function": "sendBridgeToL1 (action encoding)",
+            "action": "Missing domain separation allows the replayed limit order bytes to be interpreted as a bridge action",
+            "effect": "Unauthorized bridge transfer executed, extracting USDC from the vault to attacker's L1 address"
+          }
+        ],
+        "combined_severity": "high",
+        "combined_scenario": "1. A user signs a limit order via _sendLimitOrder to buy asset X at price P. The signed action bytes contain no nonce field (H1). 2. After the order is legitimately executed once, an attacker re-submits the identical signed action bytes. Because there is no nonce, the contract accepts the replay. 3. The replayed action flows through _sendRaw (H7), which calls ICoreWriter.sendRawAction but does not check the return value. Even if the action fails or produces an unexpected result, the transaction continues without revert. 4. H12: If the replayed action's payload can be reinterpreted as a bridge action (due to missing domain separation in action encoding \u2014 the payload contains only ACTION_VERSION, ACTION_SEND_ASSET, token index, and amount with no context identifier), the attacker can cause the system to execute a bridge transfer that was never authorized by the original signer. This allows unauthorized extraction of USDC from the vault to an attacker-controlled L1 address.",
+        "root_cause": "Signed limit orders lack a nonce, allowing unlimited replay; the underlying _sendRaw does not validate ICoreWriter return values, and bridge actions lack domain separation, enabling replayed actions to be reinterpreted across contexts.",
+        "component_hypothesis_ids": [
+          "38623a95-421f-44e9-86d0-ef53beb2dbb4",
+          "6031e689-30e3-4bf2-9207-44bdacc78479",
+          "e227a0fb-8e05-4d4f-a9dc-44bd062de5f8"
+        ],
+        "affected_functions": [
+          "_sendLimitOrder",
+          "emergencyBridgePrincipalFromL1",
+          "_sendL1Bridge",
+          "_sendRaw",
+          "sendBridgeToL1",
+          "bridgeYieldFromL1"
+        ],
+        "priority_score": 99.0
+      },
+      {
+        "id": "6c90cdee-6026-4889-9138-1b4502f5b71d",
+        "audit_id": "e15aeb56-b09b-43cb-a96a-c7c5f90bf321",
+        "title": "Compounding Double-Counting \u2192 Same-Block Surplus Extraction \u2192 Floor-Distorted Backing",
+        "steps": [
+          {
+            "order": 1,
+            "hypothesis_id": "2d62d461-1e20-46df-a670-569813a22965",
+            "function": "_readL1Backing",
+            "action": "Supplied USDC double-counted (0x80F + 0x811) and spot USDC double-counted (0x80F + 0x801)",
+            "effect": "Backing inflated by 2-3\u00d7 for affected components"
+          },
+          {
+            "order": 2,
+            "hypothesis_id": "2e787aa6-e0cd-44ad-bbd2-808824e923bb",
+            "function": "settleDailyPnL (same-block sandwich)",
+            "action": "Attacker frontruns settlement with deposit; inflated backing read by totalBackingSigned",
+            "effect": "distributableSurplus computed on massively overstated backing"
+          },
+          {
+            "order": 3,
+            "hypothesis_id": "ae4269f9-bae7-4af6-91f5-0640b9d85e55",
+            "function": "distributableSurplus / surplus",
+            "action": "Excess yield authorized and distributed based on inflated backing",
+            "effect": "Real value extracted from the protocol as yield on fictitious profits"
+          },
+          {
+            "order": 4,
+            "hypothesis_id": "fb290c8e-c4bd-407f-95b3-e7357391b899",
+            "function": "totalBacking (floor at zero)",
+            "action": "If L1 losses dominate, floor masks the inflation in public-facing backing queries",
+            "effect": "External observers see a normal backing value while the settlement used the inflated un-floored value, hiding the extraction"
+          }
+        ],
+        "combined_severity": "critical",
+        "combined_scenario": "1. _readL1Backing aggregates backing from multiple L1 sources. H2: USDC supplied to the PM pool is counted both inside accountValueSigned (0x80F, which includes PM margin) and via suppliedBalance (0x811). H3: Spot USDC in the perp account is counted both inside accountValueSigned (0x80F) and via spotBalance (0x801). These two bugs compound \u2014 the same USDC is counted up to three times across different reads. 2. H0: Attacker detects a pending settleDailyPnL transaction and frontruns it by depositing USDC into the vault. The deposit inflates usdc.balanceOf(vault) on the EVM side. When settleDailyPnL executes, totalBackingSigned reads the inflated EVM balance plus the multiply-counted L1 balances, producing a massively overstated backing. 3. distributableSurplus is computed against this inflated backing, authorizing a yield distribution far in excess of real profits. 4. H9: If L1 perp positions simultaneously suffer large unrealized losses, totalBacking() applies a floor at zero, discarding the positive EVM USDC component. This means the reported totalBacking for other consumers (e.g., share price calculations) can be artificially depressed while settleDailyPnL used the un-floored inflated value \u2014 creating an accounting asymmetry the attacker exploits to extract value while the protocol's public-facing backing appears sound.",
+        "root_cause": "Two independent double-counting bugs (supplied USDC and spot USDC) compound within _readL1Backing to inflate backing; settleDailyPnL's same-block sandwich exploits this, and the totalBacking() floor at zero masks the distortion when L1 losses dominate.",
+        "component_hypothesis_ids": [
+          "2d62d461-1e20-46df-a670-569813a22965",
+          "2e787aa6-e0cd-44ad-bbd2-808824e923bb",
+          "ae4269f9-bae7-4af6-91f5-0640b9d85e55",
+          "fb290c8e-c4bd-407f-95b3-e7357391b899"
+        ],
+        "affected_functions": [
+          "_readL1Backing",
+          "totalBackingSigned",
+          "settleDailyPnL",
+          "distributableSurplus",
+          "surplus",
+          "totalBacking"
+        ],
+        "priority_score": 99.0
+      }
+    ],
+    "tokens_used": 0,
+    "cost_usd": 0.0,
+    "errors": [],
+    "degraded_tools": []
+  },
+  "elapsed_s": 931.086,
+  "usage": {
+    "calls": 58,
+    "input_tokens": 473070,
+    "output_tokens": 128264,
+    "tokens": 601334,
+    "cost_usd": 2.144654,
+    "cost_source": "provider_price_table",
+    "unpriced_models": [],
+    "by_model": {
+      "qwen/qwen3.7-max": {
+        "calls": 58,
+        "input_tokens": 473070,
+        "output_tokens": 128264,
+        "cost_usd": 2.144654,
+        "priced": true
+      }
+    }
+  }
+}

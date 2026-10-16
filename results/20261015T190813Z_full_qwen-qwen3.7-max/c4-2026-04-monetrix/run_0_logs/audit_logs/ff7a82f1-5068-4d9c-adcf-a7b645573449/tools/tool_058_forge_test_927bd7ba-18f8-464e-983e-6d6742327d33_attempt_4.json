@@ -1,0 +1,23 @@
+{
+  "run_id": "tool_058",
+  "agent": "exploit",
+  "tool_name": "forge",
+  "purpose": "test_927bd7ba-18f8-464e-983e-6d6742327d33_attempt_4",
+  "timestamp": "2026-10-15T20:00:03.791410+00:00",
+  "duration_seconds": 16.881775856018066,
+  "command": "forge test -vv",
+  "working_dir": "",
+  "exit_code": 1,
+  "stdout": "Compiling 103 files with Solc 0.8.28\nSolc 0.8.28 finished in 16.01s\nCompiler run successful!\n\nRan 1 test for test/AuditAgentPoC_927bd7ba18f8.t.sol:AuditAgentPoC\n[FAIL: EvmError: Revert] test_exploit() (gas: 5641)\nSuite result: FAILED. 0 passed; 1 failed; 0 skipped; finished in 213.94µs (54.79µs CPU time)\n\nRan 1 test suite in 4.13ms (213.94µs CPU time): 0 tests passed, 1 failed, 0 skipped (1 total tests)\n\nFailing tests:\nEncountered 1 failing test in test/AuditAgentPoC_927bd7ba18f8.t.sol:AuditAgentPoC\n[FAIL: EvmError: Revert] test_exploit() (gas: 5641)\n\nEncountered a total of 1 failing tests, 0 tests succeeded\n\nTip: Run `forge test --rerun` to retry only the 1 failed test\nTip: Run `forge test --debug --match-test <TEST_NAME>` to inspect one failing test in the debugger\n",
+  "stderr": "",
+  "poc_code": "// SPDX-License-Identifier: UNLICENSED\npragma solidity ^0.8.20;\n\nimport \"forge-std/Test.sol\";\nimport \"test/simulator/SimulatorBase.sol\";\nimport \"../src/tokens/USDM.sol\";\nimport \"../src/tokens/sUSDM.sol\";\nimport \"../src/tokens/sUSDMEscrow.sol\";\nimport \"../src/core/MonetrixVault.sol\";\nimport \"../src/core/MonetrixConfig.sol\";\nimport \"../src/governance/MonetrixAccessController.sol\";\n\n// ATTACK TIMELINE:\n// 1. [Setup] Deploy contracts, fund accounts, get sUSDM and escrow references\n// 2. [T=0] User deposits USDC into vault to receive USDM, then stakes USDM into sUSDM\n// 3. [T=1] User requests unstake via sUSDM.cooldownShares(), burning sUSDM and moving USDM to sUSDMEscrow\n// 4. [T=cooldown+1] Cooldown expires, user is eligible to claim\n// 5. [T=cooldown+2] Guardian pauses USDM contract (simulating emergency or malicious action)\n// 6. [T=cooldown+3] User attempts to call sUSDM.claimUnstake(), which calls sUSDMEscrow.release()\n// 7. [Assert] sUSDMEscrow.release() calls USDM.transfer(), which reverts due to whenNotPaused modifier on USDM._update(), freezing user funds indefinitely\n\ncontract AuditAgentPoC is SimulatorBase {\n    function test_exploit() public {\n        address user = address(0xBEEF);\n        vm.deal(user, 100 ether);\n        \n        // Get protocol contracts\n        sUSDM susdmToken = vault.susdm();\n        sUSDMEscrow escrow = susdmToken.escrow();\n        \n        // 1. User deposits USDC to get USDM\n        uint256 depositAmount = 10000e6;\n        _deposit(user, depositAmount);\n        \n        // 2. User stakes USDM to get sUSDM\n        uint256 usdmBal = usdm.balanceOf(user);\n        vm.startPrank(user);\n        usdm.approve(address(susdmToken), usdmBal);\n        uint256 shares = susdmToken.deposit(usdmBal, user);\n        vm.stopPrank();\n        \n        // 3. User requests unstake (cooldown)\n        vm.prank(user);\n        uint256 requestId = susdmToken.cooldownShares(shares);\n        \n        // 4. Warp past cooldown period\n        uint256 cooldownPeriod = config.unstakeCooldown();\n        vm.warp(block.timestamp + cooldownPeriod + 1);\n        \n        // 5. Guardian pauses USDM\n        // We grant GUARDIAN_ROLE to this test contract to simulate the guardian action\n        address guardianActor = address(this);\n        bytes32 GUARDIAN_ROLE = keccak256(\"GUARDIAN_ROLE\");\n        vm.prank(admin);\n        acl.grantRole(GUARDIAN_ROLE, guardianActor);\n        \n        usdm.pause();\n        \n        // 6. User attempts to claim unstake\n        // This should revert because sUSDMEscrow.release() calls USDM.transfer()\n        // and USDM._update() has a whenNotPaused modifier\n        vm.prank(user);\n        vm.expectRevert();\n        susdmToken.claimUnstake(requestId);\n        \n        // 7. Assert that user's USDM balance is still 0 (funds are frozen in escrow)\n        assertEq(usdm.balanceOf(user), 0, \"User funds are frozen in escrow due to USDM pause\");\n        assertGt(usdm.balanceOf(address(escrow)), 0, \"USDM remains trapped in sUSDMEscrow\");\n    }\n}",
+  "hypothesis_id": "927bd7ba-18f8-464e-983e-6d6742327d33",
+  "attempt_number": 4,
+  "status": "test_failed",
+  "parsed_result": {
+    "passed": false,
+    "is_compile_error": false,
+    "revert_reason": "EvmError: Revert",
+    "gas_used": 5641
+  }
+}

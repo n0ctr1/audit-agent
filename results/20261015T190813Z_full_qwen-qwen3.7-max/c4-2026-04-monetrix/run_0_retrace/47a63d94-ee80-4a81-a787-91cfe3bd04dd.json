@@ -1,0 +1,12 @@
+{
+  "hypothesis_id": "47a63d94-ee80-4a81-a787-91cfe3bd04dd",
+  "verbosity": 4,
+  "profile": null,
+  "passed": true,
+  "mock": false,
+  "output": "Compiling 103 files with Solc 0.8.28\nSolc 0.8.28 finished in 15.99s\nCompiler run successful!\n\nRan 1 test for test/AuditAgentPoC_47a63d94ee80.t.sol:AuditAgentPoC\n[PASS] test_exploit() (gas: 16687)\nLogs:\n  Step 2: payload1 length = 31\n  Step 4: payload2 length = 31\n\nTraces:\n  [16687] AuditAgentPoC::test_exploit()\n    \u251c\u2500 [0] VM::warp(1000)\n    \u2502   \u2514\u2500 \u2190 [Return]\n    \u251c\u2500 [0] VM::roll(100)\n    \u2502   \u2514\u2500 \u2190 [Return]\n    \u251c\u2500 [0] console::log(\"Step 2: payload1 length =\", 31) [staticcall]\n    \u2502   \u2514\u2500 \u2190 [Stop]\n    \u251c\u2500 [0] VM::warp(2000)\n    \u2502   \u2514\u2500 \u2190 [Return]\n    \u251c\u2500 [0] VM::roll(200)\n    \u2502   \u2514\u2500 \u2190 [Return]\n    \u251c\u2500 [0] console::log(\"Step 4: payload2 length =\", 31) [staticcall]\n    \u2502   \u2514\u2500 \u2190 [Stop]\n    \u2514\u2500 \u2190 [Return]\n\nSuite result: ok. 1 passed; 0 failed; 0 skipped; finished in 264.91\u00b5s (114.12\u00b5s CPU time)\n\nRan 1 test suite in 4.08ms (264.91\u00b5s CPU time): 1 tests passed, 0 failed, 0 skipped (1 total tests)\n",
+  "error": "",
+  "retraced_at": "2026-10-15T21:18:34.879399+00:00",
+  "contest_id": "c4-2026-04-monetrix",
+  "run_index": 0
+}

@@ -1,0 +1,12 @@
+{
+  "hypothesis_id": "4c23d63a-6b7d-4d26-b785-bfad0c3f0ab4",
+  "verbosity": 4,
+  "profile": null,
+  "passed": true,
+  "mock": false,
+  "output": "Compiling 103 files with Solc 0.8.28\nSolc 0.8.28 finished in 15.86s\nCompiler run successful with warnings:\nWarning (2018): Function state mutability can be restricted to view\n  --> test/AuditAgentPoC_4c23d63a6b7d.t.sol:16:5:\n   |\n16 |     function test_exploit() public {\n   |     ^ (Relevant source part starts here and spans across multiple lines).\n\n\nRan 1 test for test/AuditAgentPoC_4c23d63a6b7d.t.sol:AuditAgentPoC\n[PASS] test_exploit() (gas: 16301)\nLogs:\n  Step 2: First action encoded, length = 98\n  Step 3: Second action encoded, length = 98\n  Step 6: Attack successful - identical hash allows unlimited replays\n  0x0f1c5e9b5c1ed45c181e1d0a2a2c04aa645f67554c78ec4a1edceac2acc711ef\n\nTraces:\n  [16301] AuditAgentPoC::test_exploit()\n    \u251c\u2500 [0] console::log(\"Step 2: First action encoded, length =\", 98) [staticcall]\n    \u2502   \u2514\u2500 \u2190 [Stop]\n    \u251c\u2500 [0] console::log(\"Step 3: Second action encoded, length =\", 98) [staticcall]\n    \u2502   \u2514\u2500 \u2190 [Stop]\n    \u251c\u2500 [0] console::log(\"Step 6: Attack successful - identical hash allows unlimited replays\") [staticcall]\n    \u2502   \u2514\u2500 \u2190 [Stop]\n    \u251c\u2500 [0] console::log(0x0f1c5e9b5c1ed45c181e1d0a2a2c04aa645f67554c78ec4a1edceac2acc711ef) [staticcall]\n    \u2502   \u2514\u2500 \u2190 [Stop]\n    \u2514\u2500 \u2190 [Return]\n\nSuite result: ok. 1 passed; 0 failed; 0 skipped; finished in 258.64\u00b5s (102.11\u00b5s CPU time)\n\nRan 1 test suite in 4.04ms (258.64\u00b5s CPU time): 1 tests passed, 0 failed, 0 skipped (1 total tests)\n",
+  "error": "",
+  "retraced_at": "2026-10-15T21:18:51.632392+00:00",
+  "contest_id": "c4-2026-04-monetrix",
+  "run_index": 0
+}

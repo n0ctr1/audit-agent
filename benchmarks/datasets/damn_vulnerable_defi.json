@@ -1,0 +1,136 @@
+{
+  "name": "damn_vulnerable_defi",
+  "contests": [
+    {
+      "id": "dvd-unstoppable",
+      "name": "Unstoppable",
+      "source_dir": "benchmarks/contracts/dvd/unstoppable",
+      "scope_file": null,
+      "docs_dir": null,
+      "split": "smoke",
+      "contest_end_date": null,
+      "contaminated": true,
+      "gt_source": null,
+      "gt_note": "Hand-written from the public Damn Vulnerable DeFi challenge descriptions, not from an audit report. Solutions are public and likely in model training data: plumbing checks only, never a quality metric.",
+      "known_issues": [],
+      "official_findings": [
+        {
+          "id": "F-01",
+          "title": "Flash loan pool can be blocked by direct token transfer",
+          "severity": "high",
+          "vulnerability_class": "denial-of-service",
+          "affected_functions": [
+            "UnstoppableLender.flashLoan(uint256)",
+            "UnstoppableLender.depositTokens(uint256)"
+          ],
+          "description": "The contract checks that poolBalance == token.balanceOf(address(this)). A direct ERC20 transfer (bypassing depositTokens) makes poolBalance < balance, permanently bricking flash loans."
+        }
+      ]
+    },
+    {
+      "id": "dvd-naive-receiver",
+      "name": "Naive Receiver",
+      "source_dir": "benchmarks/contracts/dvd/naive-receiver",
+      "scope_file": null,
+      "docs_dir": null,
+      "split": "smoke",
+      "contest_end_date": null,
+      "contaminated": true,
+      "gt_source": null,
+      "gt_note": "Hand-written from the public Damn Vulnerable DeFi challenge descriptions, not from an audit report. Solutions are public and likely in model training data: plumbing checks only, never a quality metric.",
+      "known_issues": [],
+      "official_findings": [
+        {
+          "id": "F-01",
+          "title": "Anyone can trigger flash loan on behalf of receiver, draining its ETH via fees",
+          "severity": "high",
+          "vulnerability_class": "access-control",
+          "affected_functions": [
+            "NaiveReceiverLenderPool.flashLoan(address,uint256)",
+            "FlashLoanReceiver.receiveEther(uint256)"
+          ],
+          "description": "flashLoan() does not require msg.sender == borrower. Any attacker can call flashLoan(victimContract, 0) 10 times, each time draining 1 ETH fee from the victim's balance."
+        }
+      ]
+    },
+    {
+      "id": "dvd-truster",
+      "name": "Truster",
+      "source_dir": "benchmarks/contracts/dvd/truster",
+      "scope_file": null,
+      "docs_dir": null,
+      "split": "smoke",
+      "contest_end_date": null,
+      "contaminated": true,
+      "gt_source": null,
+      "gt_note": "Hand-written from the public Damn Vulnerable DeFi challenge descriptions, not from an audit report. Solutions are public and likely in model training data: plumbing checks only, never a quality metric.",
+      "known_issues": [],
+      "official_findings": [
+        {
+          "id": "F-01",
+          "title": "Flash loan executes arbitrary calldata allowing token approval theft",
+          "severity": "critical",
+          "vulnerability_class": "arbitrary-call",
+          "affected_functions": [
+            "TrusterLenderPool.flashLoan(uint256,address,address,bytes)"
+          ],
+          "description": "The flashLoan function executes target.functionCall(data) with attacker-controlled target and data. Attacker encodes token.approve(attacker, MAX_UINT) as calldata, then transfers all tokens in a follow-up transaction."
+        }
+      ]
+    },
+    {
+      "id": "dvd-side-entrance",
+      "name": "Side Entrance",
+      "source_dir": "benchmarks/contracts/dvd/side-entrance",
+      "scope_file": null,
+      "docs_dir": null,
+      "split": "smoke",
+      "contest_end_date": null,
+      "contaminated": true,
+      "gt_source": null,
+      "gt_note": "Hand-written from the public Damn Vulnerable DeFi challenge descriptions, not from an audit report. Solutions are public and likely in model training data: plumbing checks only, never a quality metric.",
+      "known_issues": [],
+      "official_findings": [
+        {
+          "id": "F-01",
+          "title": "Reentrancy via flash loan allows stealing pool ETH",
+          "severity": "critical",
+          "vulnerability_class": "SWC-107",
+          "affected_functions": [
+            "SideEntranceLenderPool.flashLoan(uint256)",
+            "SideEntranceLenderPool.deposit()",
+            "SideEntranceLenderPool.withdraw()"
+          ],
+          "description": "During flashLoan() the attacker calls deposit() inside the IFlashLoanEtherReceiver.execute() callback with the borrowed ETH. This credits the attacker's balance in the pool accounting, satisfying the loan check. Attacker then withdraws the credited amount."
+        }
+      ]
+    },
+    {
+      "id": "dvd-the-rewarder",
+      "name": "The Rewarder",
+      "source_dir": "benchmarks/contracts/dvd/the-rewarder",
+      "scope_file": null,
+      "docs_dir": null,
+      "split": "smoke",
+      "contest_end_date": null,
+      "contaminated": true,
+      "gt_source": null,
+      "gt_note": "Hand-written from the public Damn Vulnerable DeFi challenge descriptions, not from an audit report. Solutions are public and likely in model training data: plumbing checks only, never a quality metric.",
+      "known_issues": [],
+      "official_findings": [
+        {
+          "id": "F-01",
+          "title": "Flash loan used to claim disproportionate rewards via single-block snapshot",
+          "severity": "high",
+          "vulnerability_class": "flash-loan",
+          "affected_functions": [
+            "TheRewarderPool.deposit(uint256)",
+            "TheRewarderPool.distributeRewards()",
+            "FlashLoanerPool.flashLoan(uint256)"
+          ],
+          "description": "Rewards are distributed proportionally to the snapshot balance taken at the start of each 5-day round. An attacker borrows DVT tokens via flash loan, deposits them into TheRewarderPool within the same block as the snapshot, claims the majority of rewards, and repays the loan — all in one transaction."
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "run_id": "tool_083",
+  "agent": "exploit",
+  "tool_name": "forge",
+  "purpose": "diagnostic_04a8d132-d08d-48cd-a4cd-8987c43502c1_attempt_2",
+  "timestamp": "2026-10-15T20:18:23.114478+00:00",
+  "duration_seconds": 0,
+  "command": "",
+  "working_dir": "",
+  "exit_code": -1,
+  "stdout": "\nError: Compiler run failed:\nError (9182): Function, variable, struct or modifier declaration expected.\n  --> test/AuditAgentPoC_04a8d132d08d.t.sol:14:7:\n   |\n14 | // ...\n   |       ^\n",
+  "stderr": "",
+  "poc_code": "// SPDX-License-Identifier: UNLICENSED\npragma solidity ^0.8.20;\n\nimport \"forge-std/Test.sol\";\nimport \"../src/governance/MonetrixAccessController.sol\";\nimport \"../src/tokens/USDM.sol\";\nimport \"../src/core/MonetrixConfig.sol\";\nimport \"../src/tokens/sUSDM.sol\";\nimport \"../src/tokens/sUSDMEscrow.sol\";\n\n// ... (comments)\n\ncontract AuditAgentPoC is Test {\n// ...",
+  "hypothesis_id": "04a8d132-d08d-48cd-a4cd-8987c43502c1",
+  "attempt_number": 2,
+  "status": "diagnostic",
+  "parsed_result": {}
+}

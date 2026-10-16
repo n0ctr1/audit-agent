@@ -1,0 +1,12 @@
+{
+  "hypothesis_id": "b5c51c13-e1c5-42c3-a4a0-c4ed8804bb2f",
+  "verbosity": 4,
+  "profile": null,
+  "passed": true,
+  "mock": false,
+  "output": "Compiling 103 files with Solc 0.8.28\nSolc 0.8.28 finished in 16.24s\nCompiler run successful!\n\nRan 1 test for test/AuditAgentPoC_b5c51c13e1c5.t.sol:AuditAgentPoC\n[PASS] test_exploit() (gas: 159977)\nTraces:\n  [159977] AuditAgentPoC::test_exploit()\n    \u251c\u2500 [43879] MockUSDC::mint(0x000000000000000000000000000000000000dEaD, 100000000000 [1e11])\n    \u2502   \u2514\u2500 \u2190 [Stop]\n    \u251c\u2500 [0] VM::startPrank(0x000000000000000000000000000000000000dEaD)\n    \u2502   \u2514\u2500 \u2190 [Return]\n    \u251c\u2500 [44078] MockUSDC::approve(MonetrixVault: [0x5991A2dF15A8F6A256D3Ec51E99254Cd3fb576A9], 100000000000 [1e11])\n    \u2502   \u2514\u2500 \u2190 [Return] true\n    \u251c\u2500 [0] VM::stopPrank()\n    \u2502   \u2514\u2500 \u2190 [Return]\n    \u251c\u2500 [0] VM::startPrank(0x000000000000000000000000000000000000dEaD)\n    \u2502   \u2514\u2500 \u2190 [Return]\n    \u251c\u2500 [0] VM::stopPrank()\n    \u2502   \u2514\u2500 \u2190 [Return]\n    \u251c\u2500 [0] VM::warp(31536001 [3.153e7])\n    \u2502   \u2514\u2500 \u2190 [Return]\n    \u251c\u2500 [0] VM::mockCall(MonetrixAccountant: [0xF62849F9A0B5Bf2913b396098F7c7019b51A820a], 0x13888565, 0x000000000000000000000000000000000000000000000000000000746a528800)\n    \u2502   \u2514\u2500 \u2190 [Return]\n    \u251c\u2500 [0] VM::mockCall(MonetrixAccountant: [0xF62849F9A0B5Bf2913b396098F7c7019b51A820a], 0x517ae157000000000000000000000000000000000000000000000000000000746a528800, 0x000000000000000000000000000000000000000000000000000000746a528800)\n    \u2502   \u2514\u2500 \u2190 [Return]\n    \u251c\u2500 [0] VM::prank(0x000000000000000000000000000000000000bEEF)\n    \u2502   \u2514\u2500 \u2190 [Return]\n    \u251c\u2500 [44083] MockUSDC::mint(YieldEscrow: [0x1d1499e622D69689cdf9004d05Ec547d650Ff211], 500000000000 [5e11])\n    \u2502   \u2514\u2500 \u2190 [Stop]\n    \u251c\u2500 [0] VM::prank(0x000000000000000000000000000000000000FEeD)\n    \u2502   \u2514\u2500 \u2190 [Return]\n    \u2514\u2500 \u2190 [Return]\n\nSuite result: ok. 1 passed; 0 failed; 0 skipped; finished in 2.76ms (136.92\u00b5s CPU time)\n\nRan 1 test suite in 4.46ms (2.76ms CPU time): 1 tests passed, 0 failed, 0 skipped (1 total tests)\n",
+  "error": "",
+  "retraced_at": "2026-10-15T21:17:54.417060+00:00",
+  "contest_id": "c4-2026-04-monetrix",
+  "run_index": 0
+}

@@ -1,0 +1,1562 @@
+{
+  "contest_id": "c4-2025-10-sequence",
+  "run_index": 0,
+  "audit_id": "576d2d63-814f-4690-bdbb-4e4ecc5d374d",
+  "started_at": "2026-10-15T06:33:43.576299+00:00",
+  "status": "ok",
+  "error": null,
+  "state": {
+    "hypotheses": [
+      {
+        "id": "18bef9fd-3ae5-4be2-8fc8-b6693812adad",
+        "audit_id": "576d2d63-814f-4690-bdbb-4e4ecc5d374d",
+        "title": "Unsigned fields in toEIP712 struct hash \u2014 delegateCall/onlyFallback/behaviorOnError/gasLimit may be mutable",
+        "vulnerability_class": "Signature Malleability / Incomplete Hash Coverage",
+        "affected_functions": [
+          "execute",
+          "fromPackedCalls",
+          "hash",
+          "signatureValidation"
+        ],
+        "attack_scenario": "1. Attacker intercepts a signed payload intended for a normal call.\n2. The toEIP712() function (not visible) may omit fields like delegateCall, onlyFallback, behaviorOnError, or gasLimit from the struct hash.\n3. Attacker flips the delegateCall flag bit (0x10) in the per-call flags byte of the packed payload, converting a regular CALL into a DELEGATECALL.\n4. The modified payload produces the same struct hash, so signature validation passes.\n5. The contract executes a delegatecall to an attacker-controlled address, enabling arbitrary storage manipulation and code execution in the context of this contract.\n6. Similarly, behaviorOnError (bits 6-7) could be changed to suppress reverts on failed sub-calls, or gasLimit could be set to 0 to grief sub-calls.\n\n--- Consolidated attack vectors ---\n[Alt vector \u2014 Reentrancy guard bypass via delegatecall in _execute allowin]: 1. Attacker crafts a signed payload with a call where delegateCall=true and to=malicious_contract.\n2. execute() passes nonReentrant guard, consumes nonce, validates signature, then calls _execute().\n3. _execute() performs DELEGATECALL to the attacker's malicious contract.\n4. The malicious contract c\n[Alt vector \u2014 Delegatecall to arbitrary untrusted contract via crafted pay]: 1. Attacker crafts a payload where one call in the batch has the delegateCall flag set (bit 5 of per-call flags byte = 0x10) and 'to' set to a malicious contract address.\n2. Attacker social-engineers the wallet owner into signing this payload (e.g., disguised as a benign DeFi interaction).\n3. During\n[Alt vector \u2014 Batch call ordering enables cross-contract state manipulatio]: 1. A signed batch payload contains multiple calls: Call A interacts with an external DeFi protocol (e.g., approves/spends tokens), and Call B interacts with the same or a dependent protocol.\n2. _consumeNonce is called before _execute, so the nonce is already incremented and the operation hash is com",
+        "required_preconditions": [
+          "toEIP712() does not include delegateCall, onlyFallback, behaviorOnError, or gasLimit in the EIP-712 struct hash",
+          "Attacker can observe or relay a valid signed payload"
+        ],
+        "estimated_severity": "critical",
+        "similar_historical_cases": [
+          "SWC-117 (Signature Malleability)",
+          "Sequence Wallet audit findings on incomplete payload hashing"
+        ],
+        "priority_score": 95.0,
+        "confidence": null,
+        "subgraph_context": null,
+        "status": "pending"
+      },
+      {
+        "id": "a4565a4a-ad2a-4ffa-8793-cbc738e67ac2",
+        "audit_id": "576d2d63-814f-4690-bdbb-4e4ecc5d374d",
+        "title": "Unsigned `_metadata` field extracted from signature influences return value (Hash Completeness Violation)",
+        "vulnerability_class": "Signature Hash Completeness \u2014 Unsigned Post-Verification Field",
+        "affected_functions": [
+          "recoverSapientSignatureCompact",
+          "_decodeSignature",
+          "_rootForPasskey"
+        ],
+        "attack_scenario": "1. Attacker obtains a valid passkey signature (e.g., by being a legitimate user or observing a prior transaction).\n2. Attacker modifies the `_metadata` bytes within the encoded `_signature` calldata. The `_metadata` field is a `bytes32` appended/trailing in the signature encoding.\n3. The modified signature is submitted to `recoverSapientSignatureCompact`.\n4. `_decodeSignature` extracts the tampered `_metadata` along with the legitimate `_webAuthnAuth`, `_x`, `_y`, and `_requireUserVerification`.\n5. `WebAuthn.verify()` succeeds because `_metadata` is never part of the verification \u2014 the WebAuthn signature over `_digest` is still valid.\n6. `_rootForPasskey(_requireUserVerification, _x, _y, _metadata)` is called with the attacker-controlled `_metadata`, producing a different `bytes32` root than the legitimate signer intended.\n7. The returned root is used downstream for authorization, passkey identification, or access control \u2014 granting the attacker unauthorized privileges.",
+        "required_preconditions": [
+          "_metadata must influence the return value of _rootForPasskey in a security-relevant way (e.g., passkey identifier, role, permission level, or account binding).",
+          "The caller of recoverSapientSignatureCompact trusts the returned bytes32 root for authorization decisions."
+        ],
+        "estimated_severity": "high",
+        "similar_historical_cases": [
+          "Coinbase Smart Wallet passkey metadata manipulation (2024) \u2014 unsigned metadata in signature encoding allowed account takeover",
+          "Generic SWC-117 (Signature Malleability) \u2014 fields outside the signed hash can be freely modified",
+          "Uniswap Permit2-style bugs where validity windows extracted from signature trailing bytes were not committed to in the signed hash"
+        ],
+        "priority_score": 88.0,
+        "confidence": null,
+        "subgraph_context": null,
+        "status": "pending"
+      },
+      {
+        "id": "c60dcf89-0922-473a-825a-c379fd2c9ef8",
+        "audit_id": "576d2d63-814f-4690-bdbb-4e4ecc5d374d",
+        "title": "Unsigned weight field in recoverBranch allows weight inflation without invalidating signatures",
+        "vulnerability_class": "Unsigned Field / SWC-117",
+        "affected_functions": [
+          "recoverBranch",
+          "recoverSapientSignature"
+        ],
+        "attack_scenario": "1. Attacker observes a valid multi-sig transaction with a branch signature blob.\n2. In the signature blob, each signer's weight is encoded in the lower nibble of the flag byte (or a subsequent byte) \u2014 this weight is NOT included in _opHash (the signed message).\n3. Attacker modifies the weight nibble/byte for each signer entry in the signature blob (e.g., changing 0x01 to 0x0F for weight 15).\n4. ecrecover still recovers the correct address since _opHash is unchanged.\n5. The accumulated weight return value is inflated.\n6. If the caller checks weight >= threshold BEFORE verifying the merkle root against the stored imageHash, the threshold check passes with forged weights.\n7. Even if root is eventually checked, the inflated weight value may be used in intermediate logic or returned to callers that trust it independently.\n\n--- Consolidated attack vectors ---\n[Alt vector \u2014 Unsigned weight field in recoverBranch branch encoding allow]: 1. In recoverBranch, addrWeight is parsed directly from the _signature calldata bytes (either from the low nibble of firstByte or from a subsequent readUint8 call). 2. The ECDSA signature (r, s, v) signs only _opHash, which is derived from the Payload.Decoded struct. 3. The addrWeight is NOT include\n[Alt vector \u2014 ERC-1271 reentrancy during view-function signature recovery ]: 1. Attacker registers a malicious ERC-1271 contract as a signer in the wallet's signature tree (with sufficient weight). 2. When isValidSignature is called, recoverBranch reaches FLAG_SIGNATURE_ERC1271 and calls IERC1271(maliciousAddr).isValidSignature(opHash, sig). 3. The malicious contract's isVal\n[Alt vector \u2014 FLAG_ADDRESS nodes allow merkle root manipulation without we]: 1. Attacker constructs a signature tree where a legitimate signer's ECDSA signature (FLAG_SIGNATURE_HASH) is included with weight=1. 2. Attacker adds multiple FLAG_ADDRESS nodes with weight=0 (using the 4-bit free field set to 0000, then a dynamic weight byte of 0) for arbitrary addresses. 3. These ",
+        "required_preconditions": [
+          "Caller of recoverBranch uses the returned weight value for threshold comparison before (or without) verifying the returned root against a stored imageHash",
+          "Attacker can submit modified signature bytes to the contract"
+        ],
+        "estimated_severity": "high",
+        "similar_historical_cases": [
+          "Sequence Wallet signature weight manipulation",
+          "Multisig wallets with unauthenticated signer metadata"
+        ],
+        "priority_score": 85.0,
+        "confidence": null,
+        "subgraph_context": null,
+        "status": "pending"
+      },
+      {
+        "id": "ab04d1dd-4c62-487e-aece-2972e923cbb2",
+        "audit_id": "576d2d63-814f-4690-bdbb-4e4ecc5d374d",
+        "title": "ECDSA signature malleability in readRSVCompact \u2014 no low-s check",
+        "vulnerability_class": "Signature Malleability",
+        "affected_functions": [
+          "readRSVCompact",
+          "recoverSapientSignature"
+        ],
+        "attack_scenario": "1. User signs a payload producing signature (r, s, v) with s > secp256k1n/2. 2. Attacker computes s' = n - s and v' = v ^ 1, yielding an equally valid signature (r, s', v') that recovers to the same address. 3. If the protocol tracks used signatures by their raw bytes (e.g., blacklist or replay cache keyed on encodedSignature), the malleable variant bypasses the check. 4. Attacker submits the malleable signature to re-execute an already-consumed operation.",
+        "required_preconditions": [
+          "Downstream ecrecover/ECDSA.recover in SessionSig.recoverSignature does not enforce s <= n/2",
+          "Protocol uses raw signature bytes for replay tracking or blacklisting"
+        ],
+        "estimated_severity": "high",
+        "similar_historical_cases": [
+          "Bitcoin CVE-2017-12842",
+          "OpenZeppelin ECDSA missing low-s check pre-v4.7"
+        ],
+        "priority_score": 85.0,
+        "confidence": null,
+        "subgraph_context": null,
+        "status": "pending"
+      },
+      {
+        "id": "57885a91-55ea-44ca-ab85-bc5571581c64",
+        "audit_id": "576d2d63-814f-4690-bdbb-4e4ecc5d374d",
+        "title": "Cross-chain replay via _noChainId zeroing chainId in domain separator",
+        "vulnerability_class": "Missing Chain ID Binding (EIP-712)",
+        "affected_functions": [
+          "domainSeparator"
+        ],
+        "attack_scenario": "1. User signs a message (e.g., recovery request) on Chain A where _noChainId=true is used, producing signature S. 2. The domain separator used is keccak256(abi.encode(TYPEHASH, name, version, 0, wallet)) \u2014 identical on every chain. 3. Attacker takes signature S and submits it on Chain B. 4. Chain B computes the same domain separator (chainId is also 0), so ecrecover succeeds. 5. The signed action executes on Chain B without user consent.\n\n--- Consolidated attack vectors ---\n[Alt vector \u2014 Caller-controlled _wallet parameter enables cross-contract d]: 1. Attacker identifies a call path where _wallet is derived from user input or msg.sender. 2. Attacker calls the function with _wallet set to a different contract address (VictimContract). 3. The computed domain separator matches what VictimContract would produce. 4. Attacker crafts a signature that\n[Alt vector \u2014 EIP-712 TYPEHASH may not match encoded fields causing silent]: 1. EIP712_DOMAIN_TYPEHASH is defined as keccak256 of a type string that does not exactly match 'EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)'. 2. Off-chain signers (ethers.js, web3) compute the standard domain separator using the canonical type string. 3. On-cha",
+        "required_preconditions": [
+          "_noChainId is set to true in at least one call path",
+          "The contract is deployed on multiple EVM chains",
+          "The signed message authorizes a state-changing action (e.g., recovery, transfer)"
+        ],
+        "estimated_severity": "high",
+        "similar_historical_cases": [
+          "Poly Network cross-chain replay (2021)",
+          "Various EIP-2612 permit replay incidents across L2s"
+        ],
+        "priority_score": 85.0,
+        "confidence": null,
+        "subgraph_context": null,
+        "status": "pending"
+      },
+      {
+        "id": "ad60be7f-cbf1-4a8a-94b1-1d3e8bf622b8",
+        "audit_id": "576d2d63-814f-4690-bdbb-4e4ecc5d374d",
+        "title": "Factory.deploy() callvalue() forwarded to uninitialized Wallet proxy enables fund theft",
+        "vulnerability_class": "SWC-132",
+        "affected_functions": [
+          "Factory.deploy",
+          "Wallet.creationCode (proxy constructor)",
+          "Hooks.receive"
+        ],
+        "attack_scenario": "1. Attacker calls Factory.deploy(mainModule, salt) with a large msg.value (e.g., 10 ETH).\n2. The Factory passes callvalue() to CREATE2, forwarding all ETH to the newly created Wallet proxy.\n3. The Wallet proxy constructor (Huff bytecode) stores the mainModule address and returns runtime code, but performs NO initialization of auth, nonce, or reentrancy state.\n4. The proxy runtime code has a receive() function (from Hooks) that accepts ETH without any access control.\n5. Before the legitimate owner can interact with the wallet, the attacker (or any observer) can call execute() with a valid signature for their configuration, or if the imageHash is predictable, front-run the first transaction.\n6. Even without execute, the ETH sits in an uninitialized proxy with no owner-set access control, and the deployer has no special privilege to recover it.",
+        "required_preconditions": [
+          "Attacker can call Factory.deploy() (it is public)",
+          "Attacker knows or can predict the mainModule and salt that will be used",
+          "The wallet has no initialization function that sets an owner"
+        ],
+        "estimated_severity": "high",
+        "similar_historical_cases": [
+          "Gnosis Safe initialization front-running",
+          "Minimal proxy (EIP-1167) uninitialized fund trapping"
+        ],
+        "priority_score": 85.0,
+        "confidence": null,
+        "subgraph_context": null,
+        "status": "pending"
+      },
+      {
+        "id": "4155e1fb-79d9-4b54-ab84-757d3687524c",
+        "audit_id": "576d2d63-814f-4690-bdbb-4e4ecc5d374d",
+        "title": "Nonce field defaults to 0 when nonceSize flag is 0 \u2014 potential unsigned/fallback sentinel in packed payload",
+        "vulnerability_class": "Unsigned Field / Signature Fallback Sentinel",
+        "affected_functions": [
+          "fromPackedCalls",
+          "signatureValidation",
+          "_consumeNonce",
+          "execute"
+        ],
+        "attack_scenario": "1. In fromPackedCalls, the 3-bit nonceSize field is extracted from globalFlag: nonceSize = (globalFlag >> 1) & 0x07. 2. When nonceSize == 0, the nonce is never read from the packed bytes and _decoded.nonce remains at its Solidity default of 0. 3. If the toEIP712 struct hash does not explicitly include the nonce (or encodes it in a way that omits it when zero), the nonce is an unsigned field \u2014 the attacker can modify the packed payload bytes to set any nonceSize/nonce value without invalidating the signature. 4. Even if nonce IS in the hash, the implicit default of 0 acts as a fallback sentinel: any signer creating a standard-format signature with nonceSize=0 is implicitly signing nonce=0, which may not be the signer's intent. 5. _consumeNonce checks currentNonce == _nonce and increments, so the first call in any space (currentNonce=0) will succeed with the default nonce=0 without the signer having explicitly encoded a nonce in the payload.",
+        "required_preconditions": [
+          "toEIP712 must not include the nonce field in the EIP-712 struct hash, OR must encode it in a way that is ambiguous when nonceSize=0",
+          "Attacker must be able to submit a valid signature alongside a modified packed payload"
+        ],
+        "estimated_severity": "high",
+        "similar_historical_cases": [
+          "Sequence Wallet nonce encoding vulnerabilities",
+          "EIP-4337 validUntil=0 sentinel bypass"
+        ],
+        "priority_score": 82.0,
+        "confidence": null,
+        "subgraph_context": null,
+        "status": "pending"
+      },
+      {
+        "id": "c84f5a51-2099-44a3-be65-9739471c7583",
+        "audit_id": "576d2d63-814f-4690-bdbb-4e4ecc5d374d",
+        "title": "Hooks fallback delegatecall allows hook contracts to hijack Wallet proxy implementation slot",
+        "vulnerability_class": "SWC-112",
+        "affected_functions": [
+          "Hooks.fallback",
+          "Hooks.addHook",
+          "Implementation._setImplementation",
+          "Wallet proxy (sstore at address())"
+        ],
+        "attack_scenario": "1. The Wallet proxy stores its implementation address at storage slot = address(this) (the proxy's own address), per the Huff constructor: `sstore(address(), _imp)`.\n2. Hooks.addHook() writes hook addresses to storage at keccak256(HOOKS_KEY, selector).\n3. Hooks.fallback() reads a hook address and performs delegatecall to it with arbitrary msg.data.\n4. A malicious hook contract (or a legitimate hook with a vulnerability) can execute `sstore(proxyAddress, maliciousImplementation)` during the delegatecall, overwriting the proxy's implementation pointer.\n5. All subsequent calls to the wallet will delegatecall to the attacker's implementation, giving full control over the wallet and all its assets.\n6. Since addHook is onlySelf, the attacker needs the wallet to approve adding the malicious hook - but a hook with a subtle vulnerability could be added legitimately and then exploited later.",
+        "required_preconditions": [
+          "A hook contract has been added to the wallet via addHook()",
+          "The hook contract contains a vulnerability or malicious code that can write to arbitrary storage slots",
+          "The attacker knows the proxy's address (which is the storage slot key for the implementation)"
+        ],
+        "estimated_severity": "critical",
+        "similar_historical_cases": [
+          "Parity Wallet library contract self-destruct via delegatecall",
+          "Proxy storage collision attacks"
+        ],
+        "priority_score": 80.0,
+        "confidence": null,
+        "subgraph_context": null,
+        "status": "pending"
+      },
+      {
+        "id": "b286f48a-d89e-4e2f-aed3-5289ab1a372e",
+        "audit_id": "576d2d63-814f-4690-bdbb-4e4ecc5d374d",
+        "title": "Chained signature final checkpoint not validated against snapshot in non-chained path",
+        "vulnerability_class": "SWC-115",
+        "affected_functions": [
+          "BaseSig.recover",
+          "BaseSig.recoverChained"
+        ],
+        "attack_scenario": "1. Attacker observes a valid signature with a snapshot (imageHash checkpointer) that has checkpoint=100 and imageHash=X.\n2. Attacker crafts a NON-chained signature (flag bits [1..0] = 00) that includes the same checkpointer address and checkpointer data.\n3. In `recover()`, the snapshot is fetched: snapshot.imageHash=X, snapshot.checkpoint=100.\n4. The attacker sets checkpoint=50 (less than 100) in the signature, and provides a valid signature tree for a DIFFERENT imageHash Y (not X).\n5. The final check `if (snapshot.imageHash != bytes32(0) && snapshot.imageHash != imageHash && checkpoint <= snapshot.checkpoint)` evaluates: X != 0 (true) && X != Y (true) && 50 <= 100 (true) \u2192 reverts.\n6. However, if the attacker sets checkpoint=101 (> 100), the check passes: 101 <= 100 is false \u2192 no revert.\n7. This means a signature with a HIGHER checkpoint than the snapshot can use a DIFFERENT imageHash, effectively bypassing the snapshot's configuration binding.\n8. The attacker can use any valid signature tree (for any configuration) as long as they set a checkpoint higher than the snapshot's checkpoint, potentially authorizing transactions with a configuration that was never approved for this checkpoint range.",
+        "required_preconditions": [
+          "A checkpointer middleware is configured and returns snapshots",
+          "The attacker can obtain a valid signature for ANY configuration with a checkpoint > snapshot.checkpoint",
+          "The checkpointer does not itself validate the imageHash-to-checkpoint binding"
+        ],
+        "estimated_severity": "high",
+        "similar_historical_cases": [
+          "State channel checkpoint bypass in payment channels"
+        ],
+        "priority_score": 78.0,
+        "confidence": null,
+        "subgraph_context": null,
+        "status": "pending"
+      },
+      {
+        "id": "663c5928-7760-402d-b524-df7e370d8fea",
+        "audit_id": "576d2d63-814f-4690-bdbb-4e4ecc5d374d",
+        "title": "Chained signature checkpoint=0 bypasses snapshot checkpoint enforcement",
+        "vulnerability_class": "SWC-115",
+        "affected_functions": [
+          "recoverChained",
+          "recover"
+        ],
+        "attack_scenario": "1. Attacker obtains a valid signature for a config update at checkpoint=100 (old config with higher threshold). 2. Attacker crafts a chained signature where the final (outermost) signature has checkpointSize=0 in its flag byte (bits [4..2]=000), causing readUintX to return checkpoint=0 without consuming bytes. 3. The inner signature has a valid imageHash and sufficient weight. 4. In recoverChained, the final checkpoint stored is 0. 5. The snapshot check `checkpoint <= _snapshot.checkpoint` evaluates to `0 <= N` which is always true, BUT if the snapshot imageHash was matched by any intermediate signature, `_snapshot.imageHash` is zeroed and the check is skipped entirely. 6. Even without snapshot match, if the checkpointer returns checkpoint=0, the attacker's old config signature (checkpoint=100) passes the inner weight check, and the outer signature with checkpoint=0 passes the snapshot check since 0 <= any_checkpoint. This allows using an old high-threshold config to authorize actions that the new low-threshold config shouldn't allow.\n\n--- Consolidated attack vectors ---\n[Alt vector \u2014 recoverChained: snapshot checkpoint bypass when snapshot ima]: 1. Attacker identifies a wallet with a stored snapshot (imageHash_A, checkpoint=100) on a checkpointer.\n2. Attacker constructs a chained signature with two entries: first entry produces imageHash_A with checkpoint=50, second entry produces imageHash_B with checkpoint=30.\n3. During recoverChained ite\n[Alt vector \u2014 Chained signature final checkpoint vs snapshot check uses wr]: 1. Attacker crafts a chained signature (signatureFlag & 0x01 == 0x01) with exactly one inner signature.\n2. The single inner signature has a valid weight >= threshold and an imageHash that does NOT match the snapshot's imageHash.\n3. After the while loop exits, `checkpoint` holds the single signature'\n[Alt vector \u2014 recoverChained: Snapshot imageHash consumed by intermediate ]: 1. Wallet has a snapshot with imageHash=A and checkpoint=100, representing a known good configuration.\n2. Attacker constructs a chained signature with two links: Link1 (newest, checkpoint=50) and Link0 (oldest, checkpoint=200).\n3. Link0 is processed first (prevCheckpoint=max). recover() returns imag",
+        "required_preconditions": [
+          "Wallet has been configured with multiple config updates (checkpoints > 0)",
+          "Attacker has signatures from an older configuration",
+          "A checkpointer is in use that returns snapshot data"
+        ],
+        "estimated_severity": "high",
+        "similar_historical_cases": [],
+        "priority_score": 78.0,
+        "confidence": null,
+        "subgraph_context": null,
+        "status": "pending"
+      },
+      {
+        "id": "cdd2277b-81b4-409e-8d37-289ec0311f5f",
+        "audit_id": "576d2d63-814f-4690-bdbb-4e4ecc5d374d",
+        "title": "recover: Checkpointer address read from signature data when _checkpointer is address(0) enables imageHash manipulation in chained signatures",
+        "vulnerability_class": "SWC-115 (Authorization)",
+        "affected_functions": [
+          "recover",
+          "recoverChained"
+        ],
+        "attack_scenario": "1. In recoverChained, for all signatures except the last, `checkpointer` is set to `address(0)`.\n2. When recover() is called with `_checkpointer = address(0)` and the signature flag has bit 0x40 set, the checkpointer address is read FROM THE SIGNATURE DATA itself: `(_checkpointer, rindex) = _signature.readAddress(rindex)`.\n3. Since `_ignoreCheckpointer` is true, the checkpointer's snapshotFor() is NOT called, but the attacker-chosen checkpointer address IS included in the imageHash: `imageHash = LibOptim.fkeccak256(imageHash, bytes32(uint256(uint160(_checkpointer))))`.\n4. An attacker can embed different checkpointer addresses in different chained signature links, producing different imageHashes than what the legitimate signers intended.\n5. This allows the attacker to make a chained signature's imageHash NOT match the on-chain stored imageHash, potentially bypassing snapshot validation or creating a configuration that appears valid under one checkpointer but is evaluated under another.\n6. Since the checkpointer is never actually called (ignoreCheckpointer=true), the attacker doesn't need the checkpointer to be a real contract - any address can be used to manipulate the imageHash.\n\n--- Consolidated attack vectors ---\n[Alt vector \u2014 noChainId flag parsed from unsigned signature byte alters EI]: In recover(), the signature flag byte (first byte of _signature) is parsed BEFORE any cryptographic verification. Bit 1 of this flag sets _payload.noChainId = (signatureFlag & 0x02 == 0x02). This noChainId value is then passed into _payload.hash() which calls domainSeparator(_decoded.noChainId, addr",
+        "required_preconditions": [
+          "Chained signature is used (signature type bit 0x01 set)",
+          "Intermediate signatures have checkpointer flag bit 0x40 set with attacker-chosen addresses"
+        ],
+        "estimated_severity": "high",
+        "similar_historical_cases": [
+          "Signature malleability via unchecked metadata fields in multi-sig wallets"
+        ],
+        "priority_score": 78.0,
+        "confidence": null,
+        "subgraph_context": null,
+        "status": "pending"
+      },
+      {
+        "id": "13aca2b2-44be-4f85-bb67-ba67cae04880",
+        "audit_id": "576d2d63-814f-4690-bdbb-4e4ecc5d374d",
+        "title": "Missing domain separator in attestation toHash enables cross-chain/cross-contract replay",
+        "vulnerability_class": "Missing Domain Separator",
+        "affected_functions": [
+          "toHash",
+          "toPackAuthData",
+          "recoverSapientSignature"
+        ],
+        "attack_scenario": "1. Signer creates an Attestation authorizing a session signer for a specific wallet on chain A. 2. toHash computes keccak256(toPacked(attestation)) with no chain ID, contract address, or EIP-712 domain separator. 3. Attacker observes the attestation on chain A and replays the identical signature on chain B (or against a different SessionManager deployment). 4. Because the hash is chain/contract-agnostic, ecrecover succeeds and the attestation is accepted on the unintended target.",
+        "required_preconditions": [
+          "Same SessionManager code deployed at different addresses or on different chains",
+          "Attestation does not embed chain ID or contract address in its signed data"
+        ],
+        "estimated_severity": "high",
+        "similar_historical_cases": [
+          "EIP-712 motivation \u2014 pre-domain-separator permit replay across forks",
+          "Poly Network cross-chain replay"
+        ],
+        "priority_score": 78.0,
+        "confidence": null,
+        "subgraph_context": null,
+        "status": "pending"
+      },
+      {
+        "id": "09c3f062-8617-41d9-a236-a27d38958aff",
+        "audit_id": "576d2d63-814f-4690-bdbb-4e4ecc5d374d",
+        "title": "signatureValidation function truncated \u2014 unable to verify all Decoded fields are included in signed hash",
+        "vulnerability_class": "Unsigned Field (Investigation Required)",
+        "affected_functions": [
+          "signatureValidation",
+          "hash",
+          "toEIP712"
+        ],
+        "attack_scenario": "The signatureValidation function (score=112.0, highest in the slice) is truncated and its full implementation is not visible. The hash() function delegates to toEIP712() which is also not visible. Without seeing toEIP712, it is impossible to confirm that all fields extracted from the packed payload (space, nonce, calls[].to, calls[].value, calls[].data, calls[].gasLimit, calls[].delegateCall, calls[].onlyFallback, calls[].behaviorOnError) are included in the signed struct hash. Any field extracted from the packed payload but omitted from toEIP712 is an unsigned field that an attacker can modify without invalidating the signature.\n\n--- Consolidated attack vectors ---\n[Alt vector \u2014 Static signature caller check bypass via ERC-4337 handleOps ]: 1. Wallet owner calls setStaticSignature(hash, address(0), farFutureTimestamp) \u2014 setting addr=address(0) means 'any caller allowed'. 2. Attacker crafts a UserOp with arbitrary callData (e.g., transfer all ETH/tokens) and uses the static signature bytes (flag 0x80 + the hash). 3. Attacker submits the\n[Alt vector \u2014 Static signature expiration relies on miner-manipulable bloc]: 1. A static signature is registered with an expiration timestamp T that is close to the current time.\n2. A miner (or validator) who is also the attacker constructs a block containing a transaction that uses this static signature.\n3. The miner sets block.timestamp to T-1 (within the ~15-second manipu",
+        "required_preconditions": [
+          "toEIP712 omits one or more fields from the Decoded struct in the EIP-712 struct hash",
+          "Attacker can observe a valid signature+payload pair and modify unsigned fields"
+        ],
+        "estimated_severity": "critical",
+        "similar_historical_cases": [
+          "Various smart wallet implementations where call parameters were not fully included in signature hashes"
+        ],
+        "priority_score": 75.0,
+        "confidence": null,
+        "subgraph_context": null,
+        "status": "pending"
+      },
+      {
+        "id": "cb5842fd-e2b3-47be-99a6-eaf0d151d79a",
+        "audit_id": "576d2d63-814f-4690-bdbb-4e4ecc5d374d",
+        "title": "Stage1Auth one-way upgrade to Stage2Module creates permanent validation bypass window",
+        "vulnerability_class": "SWC-124",
+        "affected_functions": [
+          "Stage1Auth._updateImageHash",
+          "Stage1Auth._isValidImage",
+          "Stage2Auth._isValidImage",
+          "Implementation._updateImplementation"
+        ],
+        "attack_scenario": "1. Stage1Auth._isValidImage() validates imageHash by computing CREATE2(FACTORY, imageHash, INIT_CODE_HASH) and comparing to address(this). This ties the wallet to a specific Factory and mainModule.\n2. When updateImageHash() is called, Stage1Auth writes the new imageHash AND upgrades the implementation to STAGE_2_IMPLEMENTATION in the same transaction.\n3. Stage2Auth._isValidImage() simply checks `_imageHash == Storage.readBytes32(IMAGE_HASH_KEY)` - it no longer validates against the Factory or CREATE2 address.\n4. After upgrade, any imageHash can be set (including ones that don't correspond to the original Factory-deployed address), because Stage2Auth dropped the CREATE2 validation.\n5. If an attacker can get the wallet to call updateImageHash with a crafted imageHash that includes them as a signer, they gain full control.\n6. The upgrade is one-way and irreversible - there is no mechanism to downgrade back to Stage1Auth's stricter validation.",
+        "required_preconditions": [
+          "Wallet is still in Stage1 (has not yet called updateImageHash)",
+          "Attacker can craft a valid signature for a config update payload that includes updateImageHash",
+          "The new imageHash includes the attacker as a signer with sufficient weight"
+        ],
+        "estimated_severity": "high",
+        "similar_historical_cases": [
+          "Upgradeable proxy validation bypass patterns"
+        ],
+        "priority_score": 75.0,
+        "confidence": null,
+        "subgraph_context": null,
+        "status": "pending"
+      },
+      {
+        "id": "a776bb74-0d63-46d2-b7fa-aa32aeb1735d",
+        "audit_id": "576d2d63-814f-4690-bdbb-4e4ecc5d374d",
+        "title": "recoverSapientSignature: memory payload mutation leaks modified parentWallets to subsequent sapient calls in same transaction",
+        "vulnerability_class": "SWC-105 (Unprotected Ether Withdrawal)",
+        "affected_functions": [
+          "recoverSapientSignature",
+          "recoverBranch"
+        ],
+        "attack_scenario": "1. A signature tree contains two FLAG_SIGNATURE_SAPIENT entries pointing to sapient contracts A and B.\n2. recoverBranch processes sapient A first: calls ISapient(A).recoverSapientSignature(_payload, sig_A).\n3. Inside recoverSapientSignature on contract A, _payload.parentWallets is mutated in memory to append msg.sender (the wallet address).\n4. Since _payload is passed as `memory` (not `calldata`), this mutation persists in the calling context's memory.\n5. When recoverBranch processes sapient B, it calls ISapient(B).recoverSapientSignature(_payload, sig_B) with the ALREADY-MODIFIED _payload that now includes the wallet address in parentWallets.\n6. Sapient contract B validates against a payload with an extra parentWallet that wasn't in the original configuration, potentially causing it to compute a different imageHash than intended.\n7. If B's validation logic depends on the exact set of parentWallets (e.g., for domain separation or multi-wallet authorization), this could lead to incorrect validation results.\n\n--- Consolidated attack vectors ---\n[Alt vector \u2014 Implicit call external call to attacker-controlled target be]: 1. Attacker crafts a payload with an implicit call at index 0 targeting a malicious contract they control, followed by explicit calls that consume usage limits.\n2. During recoverSapientSignature, the loop processes call[0] (implicit) first, reaching _validateImplicitCall which calls ISignalsImplicit\n[Alt vector \u2014 Session signer reuse across implicit and explicit calls bypa]: 1. A session signer is configured with both implicit attestation capabilities AND explicit session permissions with a valueLimit.\n2. The attacker (who controls this session signer) creates a payload with: call[0] = incrementUsageLimit (explicit, callIdx=0), call[1..N] = implicit calls with value=0 (",
+        "required_preconditions": [
+          "The signature tree contains multiple FLAG_SIGNATURE_SAPIENT entries",
+          "The sapient contracts' validation logic is sensitive to the parentWallets array content",
+          "Both sapient calls occur within the same recoverBranch execution"
+        ],
+        "estimated_severity": "medium",
+        "similar_historical_cases": [
+          "Memory aliasing bugs in Solidity where callee mutations affect caller state"
+        ],
+        "priority_score": 65.0,
+        "confidence": null,
+        "subgraph_context": null,
+        "status": "pending"
+      },
+      {
+        "id": "f71d8819-fe35-4f30-9d4a-fb2bb990a0e7",
+        "audit_id": "576d2d63-814f-4690-bdbb-4e4ecc5d374d",
+        "title": "SessionManager view-only validation allows TOCTOU on usage limits across batched calls",
+        "vulnerability_class": "SWC-124",
+        "affected_functions": [
+          "SessionManager.recoverSapientSignature",
+          "ExplicitSessionManager._validateExplicitCall",
+          "ExplicitSessionManager._validateLimitUsageIncrement",
+          "ExplicitSessionManager.incrementUsageLimit",
+          "PermissionValidator.validatePermission"
+        ],
+        "attack_scenario": "1. SessionManager.recoverSapientSignature() is a `view` function called during signature validation in BaseAuth.signatureValidation().\n2. During this view call, it computes expected usage limit increments and validates them against the current state.\n3. It expects the first call in the payload to be incrementUsageLimit() which will persist the new limits.\n4. However, the view validation reads `getLimitUsage()` from storage, computes expected new values, and returns.\n5. During actual execution in Calls._execute(), if any call BEFORE incrementUsageLimit modifies the limitUsage storage (e.g., via a hook delegatecall or a call to another contract that calls back to incrementUsageLimit), the pre-validated limits become stale.\n6. The incrementUsageLimit call then writes values that were validated against stale state, potentially allowing usage limit bypass.\n7. The SessionManager bans ABORT_ON_ERROR but does not ban IGNORE_ERROR for the increment call itself, and the onlyFallback check in _validateLimitUsageIncrement can be bypassed if the preceding call fails with IGNORE_ERROR.",
+        "required_preconditions": [
+          "Session with usage limits is active",
+          "Payload contains calls that can modify limitUsage state before incrementUsageLimit executes",
+          "The wallet has hooks or other mechanisms that can trigger state changes mid-batch"
+        ],
+        "estimated_severity": "medium",
+        "similar_historical_cases": [
+          "Compound cToken exchange rate manipulation via stale reads"
+        ],
+        "priority_score": 65.0,
+        "confidence": null,
+        "subgraph_context": null,
+        "status": "pending"
+      },
+      {
+        "id": "8be1f7c6-1bf8-41ef-a6f7-f1491f1a23f5",
+        "audit_id": "576d2d63-814f-4690-bdbb-4e4ecc5d374d",
+        "title": "Guest and Calls inconsistent delegateCall handling enables bypass via fallback dispatch",
+        "vulnerability_class": "SWC-124",
+        "affected_functions": [
+          "Guest._dispatchGuest",
+          "Calls._execute",
+          "Guest.fallback"
+        ],
+        "attack_scenario": "1. Guest._dispatchGuest() explicitly reverts on delegateCall: `if (call.delegateCall) revert DelegateCallNotAllowed(i)`.\n2. Calls._execute() allows delegateCall and forwards to IDelegatedExtension.handleSequenceDelegateCall.\n3. If Guest is used as a fallback handler for the wallet (e.g., via Hooks or direct fallback), an attacker can route calls through Guest that should be restricted, or route calls through Calls that Guest was meant to restrict.\n4. Specifically, if a session signer's permissions are validated assuming Guest's restrictions (no delegatecall), but execution happens through Calls (which allows delegatecall), the session signer can execute delegatecalls that were assumed to be impossible.\n5. This creates an assumption mismatch: SessionManager validates calls assuming certain restrictions that differ between Guest and Calls execution paths.",
+        "required_preconditions": [
+          "Guest contract is registered as a fallback handler or accessible execution path for the wallet",
+          "Session permissions are configured assuming Guest's stricter delegateCall restrictions",
+          "The wallet's execution routing can direct calls through either Guest or Calls"
+        ],
+        "estimated_severity": "medium",
+        "similar_historical_cases": [
+          "Gnosis Safe module execution path bypass"
+        ],
+        "priority_score": 60.0,
+        "confidence": null,
+        "subgraph_context": null,
+        "status": "pending"
+      },
+      {
+        "id": "cc9dce00-dd11-488d-94da-5da27f7f111c",
+        "audit_id": "576d2d63-814f-4690-bdbb-4e4ecc5d374d",
+        "title": "Hash collision in _leafForSapient via abi.encodePacked with bytes32 prefix string",
+        "vulnerability_class": "SWC-133 (Hash Collision)",
+        "affected_functions": [
+          "BaseSig._leafForSapient",
+          "BaseSig._leafForAddressAndWeight"
+        ],
+        "attack_scenario": "1. _leafForSapient computes keccak256(abi.encodePacked('Sequence sapient config:\\n', _addr, _weight, _imageHash)).\n2. While _addr (20 bytes), _weight (32 bytes), and _imageHash (32 bytes) are all fixed-length, the string literal 'Sequence sapient config:\\n' is 25 bytes and 'Sequence signer:\\n' is 16 bytes.\n3. An attacker controlling _addr and _weight in _leafForAddressAndWeight could attempt to craft values such that the packed encoding of ('Sequence signer:\\n', addr, weight) collides with a packed encoding of ('Sequence sapient config:\\n', addr', weight', imageHash') from _leafForSapient.\n4. Since the prefix strings differ in length (16 vs 25 bytes) and all subsequent fields are fixed-width, a direct cross-function collision requires the 16-byte prefix + 20-byte addr + first 9 bytes of weight to equal the 25-byte prefix + first 20 bytes of addr', which is computationally infeasible.\n5. However, if additional leaf types are added in the future with different-length prefixes but overlapping field layouts, the use of abi.encodePacked without a delimiter or type tag becomes exploitable. This is a design-level weakness.",
+        "required_preconditions": [
+          "Future additions of new leaf types with different-length string prefixes in the same merkle tree.",
+          "Attacker must be able to choose parameters for one leaf type freely."
+        ],
+        "estimated_severity": "low",
+        "similar_historical_cases": [
+          "Uniswap V2 abi.encodePacked collision warnings",
+          "Various OpenZeppelin advisory on abi.encodePacked with variable-length types"
+        ],
+        "priority_score": 25.0,
+        "confidence": null,
+        "subgraph_context": null,
+        "status": "pending"
+      },
+      {
+        "id": "26bc9708-bbee-4d19-ae55-6149cb6ba168",
+        "audit_id": "576d2d63-814f-4690-bdbb-4e4ecc5d374d",
+        "title": "abi.encodePacked with string type enables potential hash collision if prefix becomes variable",
+        "vulnerability_class": "SWC-133",
+        "affected_functions": [
+          "_leafForRecoveryLeaf"
+        ],
+        "attack_scenario": "1. The function uses abi.encodePacked with a string argument, which omits length prefixes for variable-length types.\n2. Currently the string is a constant literal (24 bytes) followed by fixed-size types, so no immediate collision exists.\n3. If a future code change makes the prefix variable, or adds another leaf function with a different-length prefix, an attacker can craft two different inputs that produce the same keccak256 hash by shifting bytes across the string/address boundary.\n4. Example: prefix 'AB' + signer starting with 0xCD... could equal prefix 'ABC' + signer starting with 0xD...",
+        "required_preconditions": [
+          "The string prefix must become variable-length, or a second leaf function with a different prefix length must be added that shares the same signing domain"
+        ],
+        "estimated_severity": "low",
+        "similar_historical_cases": [
+          "SWC-133 examples where abi.encodePacked with dynamic strings allowed hash collisions"
+        ],
+        "priority_score": 25.0,
+        "confidence": null,
+        "subgraph_context": null,
+        "status": "pending"
+      },
+      {
+        "id": "fdba384e-22cb-4446-983e-f651c3e1a0f4",
+        "audit_id": "576d2d63-814f-4690-bdbb-4e4ecc5d374d",
+        "title": "Attack chain: Chained Signature Checkpoint Bypass via Attacker-Controlled Checkpointer",
+        "vulnerability_class": "Attack Chain",
+        "affected_functions": [
+          "recoverChained",
+          "recover"
+        ],
+        "attack_scenario": "1. Attacker obtains a valid chained signature for a configuration update at a high checkpoint (e.g., checkpoint=100 with a high-threshold multi-sig config). 2. Attacker crafts a new chained signature where the outermost (final) signature has checkpointSize=0 in its flag byte (bits [4..2]=000), causing recoverChained to skip snapshot checkpoint enforcement entirely (H9). 3. For all non-final signatures in the chain, recoverChained passes _checkpointer=address(0) to recover(). When recover() sees _checkpointer=address(0) and flag bit 0x40 is set, it reads the checkpointer address directly FROM the attacker-controlled signature data (H10). 4. Attacker embeds a malicious checkpointer contract address in the signature bytes. This contract's imageHash() function returns whatever imageHash the attacker needs to pass validation. 5. The combined effect \u2014 bypassing checkpoint enforcement AND controlling the checkpointer \u2014 allows the attacker to forge authorization for any configuration change, including lowering the signing threshold to 1-of-1 and taking full control of the wallet. Neither H9 nor H10 alone achieves this: H9 without H10 still requires a legitimate checkpointer, and H10 without H9 is blocked by checkpoint enforcement.\n\nChain steps:\n  1. recoverChained: Craft chained signature with checkpointSize=0 in final signature flag byte \u2192 Snapshot checkpoint enforcement is completely skipped for the final signature\n  2. recover (called from recoverChained with _checkpointer=address(0)): Embed malicious checkpointer address in signature data with flag bit 0x40 set \u2192 recover() reads checkpointer from attacker-controlled signature bytes instead of using a trusted address\n  3. recover (imageHash validation): Malicious checkpointer contract returns attacker-chosen imageHash \u2192 Authorization check passes with attacker-forged imageHash, enabling arbitrary config changes like threshold reduction to 1-of-1\n\nRoot cause: recoverChained passes address(0) as checkpointer for non-final signatures, and checkpoint=0 skips enforcement, allowing attacker to supply arbitrary checkpointer from signature data\n\nComposed from: [9] Chained signature checkpoint=0 bypasses snapshot checkpoint ; [10] recover: Checkpointer address read from signature data when ",
+        "required_preconditions": [],
+        "estimated_severity": "critical",
+        "similar_historical_cases": [],
+        "priority_score": 88.0,
+        "confidence": 0.7,
+        "subgraph_context": null,
+        "status": "pending"
+      },
+      {
+        "id": "cfd7d414-a16c-41a4-8e97-3791692f3b2c",
+        "audit_id": "576d2d63-814f-4690-bdbb-4e4ecc5d374d",
+        "title": "Attack chain: Unsigned EIP-712 Fields + Nonce Default Enable Persistent Signature Replay with DelegateCall Hijack",
+        "vulnerability_class": "Attack Chain",
+        "affected_functions": [
+          "execute",
+          "fromPackedCalls",
+          "hash",
+          "signatureValidation",
+          "_consumeNonce"
+        ],
+        "attack_scenario": "1. A legitimate user signs a transaction payload via the wallet's EIP-712 signature scheme. The toEIP712() function omits fields like delegateCall, onlyFallback, behaviorOnError, and gasLimit from the struct hash (H0). 2. The attacker intercepts this signed payload and modifies it: sets nonceSize=0 in the globalFlag (3-bit field), which causes fromPackedCalls to never read a nonce from the packed bytes, leaving _decoded.nonce at its Solidity default of 0 (H6). 3. The attacker also flips the delegateCall flag from false to true in the unsigned portion of the payload. Since neither the nonce nor delegateCall are covered by the signature hash, the modified payload still passes signature validation. 4. The attacker submits this payload to execute(). Because nonce is always 0, the same modified payload can be replayed indefinitely across multiple transactions. The delegateCall=true routes execution through a delegatecall path, potentially allowing the attacker to execute arbitrary code in the wallet's context. 5. H0 alone allows field mutation but nonce tracking could prevent replay; H6 alone forces nonce=0 but signed fields can't be mutated. Together they enable persistent, replayable payload mutation.\n\nChain steps:\n  1. fromPackedCalls: Attacker modifies intercepted signed payload: sets nonceSize=0 in globalFlag and flips delegateCall to true \u2192 Nonce defaults to 0 (never consumed from payload) and delegateCall is mutated, both outside the signed hash\n  2. signatureValidation: Submit modified payload for validation \u2192 Signature verification passes because neither nonce nor delegateCall are included in the EIP-712 struct hash\n  3. execute: Execute the mutated payload with delegateCall=true and nonce=0 \u2192 DelegateCall executes attacker code in wallet context; nonce=0 allows indefinite replay of the same payload\n\nRoot cause: toEIP712 omits delegateCall/gasLimit from struct hash, and nonceSize=0 causes nonce to default to 0, together enabling replayable mutated payloads\n\nComposed from: [0] Unsigned fields in toEIP712 struct hash \u2014 delegateCall/onlyF; [6] Nonce field defaults to 0 when nonceSize flag is 0 \u2014 potenti",
+        "required_preconditions": [],
+        "estimated_severity": "critical",
+        "similar_historical_cases": [],
+        "priority_score": 99.0,
+        "confidence": 0.7,
+        "subgraph_context": null,
+        "status": "pending"
+      },
+      {
+        "id": "52da50d4-4db0-4e69-919c-a43a4613591a",
+        "audit_id": "576d2d63-814f-4690-bdbb-4e4ecc5d374d",
+        "title": "Attack chain: Weight Inflation + Sapient Memory Mutation Leak Unauthorized Wallet Access",
+        "vulnerability_class": "Attack Chain",
+        "affected_functions": [
+          "recoverBranch",
+          "recoverSapientSignature"
+        ],
+        "attack_scenario": "1. Attacker observes a valid multi-sig transaction with a branch signature blob where signers have specific weights encoded in the signature (e.g., lower nibble of flag byte). The weight field is NOT included in _opHash (H2). 2. Attacker modifies the signature blob, inflating the weight of a single signer they control from 1 to a value that meets the threshold (e.g., from 1 to 10 when threshold is 10). Since weight is unsigned, recoverBranch accepts the inflated weight without invalidating the signature. 3. recoverBranch calls recoverSapientSignature on a sapient contract in the signature tree. Inside this call, the sapient contract mutates the _payload in memory (H14). The mutated payload \u2014 containing modified parentWallets data \u2014 leaks back to the caller. 4. When a second sapient contract B is processed in the same signature tree, it receives the already-mutated payload from step 3. The leaked parentWallets modifications can grant the attacker unauthorized access to parent wallet operations or bypass authorization checks in sapient B. 5. H2 alone inflates weight but doesn't leak data; H14 alone mutates memory but requires valid signature context. Together, weight inflation provides the entry point and memory mutation propagates unauthorized state changes.\n\nChain steps:\n  1. recoverBranch: Attacker inflates weight of controlled signer in signature blob (unsigned field not in _opHash) \u2192 Inflated weight meets threshold, signature passes validation with attacker-controlled signer\n  2. recoverSapientSignature (called from recoverBranch for sapient A): Sapient A processes the signature and mutates _payload in memory \u2192 Modified parentWallets data leaks into shared memory space\n  3. recoverSapientSignature (called for sapient B in same transaction): Sapient B receives already-mutated payload from step 2 \u2192 Leaked parentWallets modifications bypass authorization in sapient B, granting unauthorized wallet operations\n\nRoot cause: Unsigned weight field in recoverBranch allows threshold manipulation, and memory mutation in recoverSapientSignature leaks modified state to subsequent calls in the same transaction\n\nComposed from: [2] Unsigned weight field in recoverBranch allows weight inflati; [14] recoverSapientSignature: memory payload mutation leaks modif",
+        "required_preconditions": [],
+        "estimated_severity": "high",
+        "similar_historical_cases": [],
+        "priority_score": 95.0,
+        "confidence": 0.7,
+        "subgraph_context": null,
+        "status": "pending"
+      },
+      {
+        "id": "45295f7b-7f9e-46ef-aee5-c7509ee53eeb",
+        "audit_id": "576d2d63-814f-4690-bdbb-4e4ecc5d374d",
+        "title": "Attack chain: Unsigned EIP-712 Fields + Inconsistent DelegateCall Dispatch Bypass",
+        "vulnerability_class": "Attack Chain",
+        "affected_functions": [
+          "execute",
+          "fromPackedCalls",
+          "hash",
+          "signatureValidation",
+          "Guest._dispatchGuest",
+          "Calls._execute",
+          "Guest.fallback"
+        ],
+        "attack_scenario": "1. A user signs a batch of calls intended for Guest execution. The toEIP712() function does not include the delegateCall flag in the struct hash (H0). 2. Attacker intercepts the signed payload and flips delegateCall from false to true for one of the calls. Since delegateCall is unsigned, the signature remains valid. 3. The modified payload is submitted to execute(). Guest._dispatchGuest() checks the delegateCall flag and reverts with DelegateCallNotAllowed(i) (H16). 4. However, the execution falls through to the fallback dispatch path (Calls._execute), which DOES allow delegateCall and forwards to IDelegatedExtension.handleSequenceDelegateCall. 5. The delegatecall executes in the wallet's context, potentially modifying storage or draining funds. H0 enables the flag mutation; H16 provides the bypass path. Neither alone achieves the exploit: without H0 the flag can't be mutated, and without H16 the Guest revert would block execution entirely.\n\nChain steps:\n  1. toEIP712 / hash: Attacker flips delegateCall flag from false to true in signed payload (field not in struct hash) \u2192 Modified payload passes signature validation since delegateCall is unsigned\n  2. Guest._dispatchGuest: Execute modified payload through Guest dispatch \u2192 Guest reverts with DelegateCallNotAllowed, but execution falls through to fallback path\n  3. Calls._execute / Guest.fallback: Fallback dispatch processes the delegateCall-enabled call \u2192 DelegateCall executes attacker-controlled code in wallet proxy context, enabling storage manipulation or fund extraction\n\nRoot cause: toEIP712 omits delegateCall from signed hash, and Guest/Calls handle delegateCall inconsistently, allowing bypass via fallback dispatch path\n\nComposed from: [0] Unsigned fields in toEIP712 struct hash \u2014 delegateCall/onlyF; [16] Guest and Calls inconsistent delegateCall handling enables b",
+        "required_preconditions": [],
+        "estimated_severity": "high",
+        "similar_historical_cases": [],
+        "priority_score": 99.0,
+        "confidence": 0.7,
+        "subgraph_context": null,
+        "status": "pending"
+      },
+      {
+        "id": "fb114d3f-c080-4719-9435-d93570245878",
+        "audit_id": "576d2d63-814f-4690-bdbb-4e4ecc5d374d",
+        "title": "Attack chain: Weight Inflation + Session TOCTOU Bypasses Usage Limits",
+        "vulnerability_class": "Attack Chain",
+        "affected_functions": [
+          "recoverBranch",
+          "recoverSapientSignature",
+          "SessionManager.recoverSapientSignature",
+          "ExplicitSessionManager._validateExplicitCall",
+          "ExplicitSessionManager._validateLimitUsageIncrement",
+          "ExplicitSessionManager.incrementUsageLimit",
+          "PermissionValidator.validatePermission"
+        ],
+        "attack_scenario": "1. Attacker targets a session-key-gated operation with usage limits (e.g., max 1 ETH transfer per session). The session requires multi-sig authorization with a specific weight threshold. 2. Attacker inflates the weight of their own signer in the branch signature blob (H2), since weight is not included in _opHash. This allows the attacker to meet the multi-sig threshold alone without other signers. 3. Attacker constructs a batched transaction containing multiple calls that each invoke session-validated operations. During signature validation, SessionManager.recoverSapientSignature() runs as a `view` function (H15). It validates usage limits against current state and computes expected increments. 4. Because the validation is view-only, the usage limit increments are not actually persisted during validation. When the batched calls execute sequentially, each call's actual state update happens after the view validation of subsequent calls. 5. The TOCTOU gap means all calls in the batch see the same pre-batch usage state during validation, allowing the attacker to exceed usage limits by the batch size multiplier. H2 provides the authorization to create the batch; H15 allows the batch to bypass limits.\n\nChain steps:\n  1. recoverBranch: Attacker inflates own signer weight to meet multi-sig threshold alone \u2192 Attacker gains authorization to create batched transactions without other signers\n  2. SessionManager.recoverSapientSignature (view): Batch of N session-limited calls submitted; view validation checks usage limits for all calls against same pre-batch state \u2192 All N calls pass validation since increments are not persisted during view-only check\n  3. ExplicitSessionManager.incrementUsageLimit (execution): Each call in batch executes and increments usage limit sequentially \u2192 Actual usage exceeds intended limit by factor of N, enabling extraction of N\u00d7 the per-session limit\n\nRoot cause: Unsigned weight in recoverBranch allows meeting threshold with fewer real signers, and SessionManager's view-only validation creates TOCTOU window for usage limit bypass across batched calls\n\nComposed from: [2] Unsigned weight field in recoverBranch allows weight inflati; [15] SessionManager view-only validation allows TOCTOU on usage l",
+        "required_preconditions": [],
+        "estimated_severity": "high",
+        "similar_historical_cases": [],
+        "priority_score": 95.0,
+        "confidence": 0.7,
+        "subgraph_context": null,
+        "status": "pending"
+      },
+      {
+        "id": "c1571d73-acbe-420f-a921-289caf786254",
+        "audit_id": "576d2d63-814f-4690-bdbb-4e4ecc5d374d",
+        "title": "Attack chain: Cross-Chain Replay + Unsigned Weight Enable Universal Wallet Takeover",
+        "vulnerability_class": "Attack Chain",
+        "affected_functions": [
+          "domainSeparator",
+          "recoverBranch",
+          "recoverSapientSignature"
+        ],
+        "attack_scenario": "1. A legitimate multi-sig configuration update is signed on Chain A (e.g., Ethereum mainnet) using the wallet's EIP-712 signature scheme. The domain separator uses _noChainId=true, zeroing the chainId field, making it identical across all chains (H4). 2. Attacker observes this valid signature and replays it on Chain B (e.g., a testnet or L2) where the same wallet proxy exists. Since the domain separator is identical, the signature is valid on Chain B. 3. On Chain B, the attacker further modifies the signature blob by inflating the weight of a controlled signer (H2), since weight is not included in _opHash. This allows the attacker to meet any threshold with a single signer. 4. The attacker submits the replayed + weight-inflated signature on Chain B to execute a configuration change, lowering the threshold to 1-of-1 and gaining full control of the wallet on Chain B. 5. H4 enables the cross-chain replay; H2 enables post-replay threshold manipulation. Together they allow takeover on any chain where the wallet is deployed.\n\nChain steps:\n  1. domainSeparator: Attacker captures valid multi-sig signature from Chain A where _noChainId=true zeroes chainId \u2192 Signature is valid on any chain since domain separator is chain-agnostic\n  2. recoverBranch (on Chain B): Replay signature on Chain B and inflate controlled signer's weight in signature blob \u2192 Replayed signature passes validation with inflated weight meeting any threshold\n  3. execute (on Chain B): Execute configuration change to set threshold to 1-of-1 \u2192 Attacker gains full control of wallet on Chain B\n\nRoot cause: Missing chainId binding in domain separator allows cross-chain signature replay, and unsigned weight field allows post-replay threshold manipulation\n\nComposed from: [4] Cross-chain replay via _noChainId zeroing chainId in domain ; [2] Unsigned weight field in recoverBranch allows weight inflati",
+        "required_preconditions": [],
+        "estimated_severity": "high",
+        "similar_historical_cases": [],
+        "priority_score": 95.0,
+        "confidence": 0.7,
+        "subgraph_context": null,
+        "status": "pending"
+      }
+    ],
+    "exploits": [],
+    "validated_findings": [
+      {
+        "id": "6e327fd5-3c94-4035-ab59-907195150f64",
+        "audit_id": "576d2d63-814f-4690-bdbb-4e4ecc5d374d",
+        "hypothesis_id": "18bef9fd-3ae5-4be2-8fc8-b6693812adad",
+        "title": "Unsigned fields in toEIP712 struct hash \u2014 delegateCall/onlyFallback/behaviorOnError/gasLimit may be mutable",
+        "vulnerability_class": "Signature Malleability / Incomplete Hash Coverage",
+        "severity": "critical",
+        "confidence": 0.0,
+        "status": "unverified",
+        "affected_functions": [
+          "execute",
+          "fromPackedCalls",
+          "hash",
+          "signatureValidation"
+        ],
+        "description": "1. Attacker intercepts a signed payload intended for a normal call.\n2. The toEIP712() function (not visible) may omit fields like delegateCall, onlyFallback, behaviorOnError, or gasLimit from the struct hash.\n3. Attacker flips the delegateCall flag bit (0x10) in the per-call flags byte of the packed payload, converting a regular CALL into a DELEGATECALL.\n4. The modified payload produces the same struct hash, so signature validation passes.\n5. The contract executes a delegatecall to an attacker-controlled address, enabling arbitrary storage manipulation and code execution in the context of this contract.\n6. Similarly, behaviorOnError (bits 6-7) could be changed to suppress reverts on failed sub-calls, or gasLimit could be set to 0 to grief sub-calls.\n\n--- Consolidated attack vectors ---\n[Alt vector \u2014 Reentrancy guard bypass via delegatecall in _execute allowin]: 1. Attacker crafts a signed payload with a call where delegateCall=true and to=malicious_contract.\n2. execute() passes nonReentrant guard, consumes nonce, validates signature, then calls _execute().\n3. _execute() performs DELEGATECALL to the attacker's malicious contract.\n4. The malicious contract c\n[Alt vector \u2014 Delegatecall to arbitrary untrusted contract via crafted pay]: 1. Attacker crafts a payload where one call in the batch has the delegateCall flag set (bit 5 of per-call flags byte = 0x10) and 'to' set to a malicious contract address.\n2. Attacker social-engineers the wallet owner into signing this payload (e.g., disguised as a benign DeFi interaction).\n3. During\n[Alt vector \u2014 Batch call ordering enables cross-contract state manipulatio]: 1. A signed batch payload contains multiple calls: Call A interacts with an external DeFi protocol (e.g., approves/spends tokens), and Call B interacts with the same or a dependent protocol.\n2. _consumeNonce is called before _execute, so the nonce is already incremented and the operation hash is com",
+        "poc_code": null,
+        "execution_trace": null,
+        "skeptic_notes": "Not validated: SKEPTIC_ENABLED=false.",
+        "skeptic_status": "unverified",
+        "poc_uri": "",
+        "trace_uri": "",
+        "report_uri": "",
+        "scope_flag": "known_issue",
+        "scope_note": "Project docs list a known issue referencing `hash` \u2014 likely accepted/out of scope.",
+        "created_at": "2026-10-15T06:52:47.088152",
+        "validated_at": null
+      },
+      {
+        "id": "4800d28b-e95c-47a9-b6f9-b108181bd244",
+        "audit_id": "576d2d63-814f-4690-bdbb-4e4ecc5d374d",
+        "hypothesis_id": "a4565a4a-ad2a-4ffa-8793-cbc738e67ac2",
+        "title": "Unsigned `_metadata` field extracted from signature influences return value (Hash Completeness Violation)",
+        "vulnerability_class": "Signature Hash Completeness \u2014 Unsigned Post-Verification Field",
+        "severity": "high",
+        "confidence": 0.0,
+        "status": "unverified",
+        "affected_functions": [
+          "recoverSapientSignatureCompact",
+          "_decodeSignature",
+          "_rootForPasskey"
+        ],
+        "description": "1. Attacker obtains a valid passkey signature (e.g., by being a legitimate user or observing a prior transaction).\n2. Attacker modifies the `_metadata` bytes within the encoded `_signature` calldata. The `_metadata` field is a `bytes32` appended/trailing in the signature encoding.\n3. The modified signature is submitted to `recoverSapientSignatureCompact`.\n4. `_decodeSignature` extracts the tampered `_metadata` along with the legitimate `_webAuthnAuth`, `_x`, `_y`, and `_requireUserVerification`.\n5. `WebAuthn.verify()` succeeds because `_metadata` is never part of the verification \u2014 the WebAuthn signature over `_digest` is still valid.\n6. `_rootForPasskey(_requireUserVerification, _x, _y, _metadata)` is called with the attacker-controlled `_metadata`, producing a different `bytes32` root than the legitimate signer intended.\n7. The returned root is used downstream for authorization, passkey identification, or access control \u2014 granting the attacker unauthorized privileges.",
+        "poc_code": null,
+        "execution_trace": null,
+        "skeptic_notes": "Not validated: SKEPTIC_ENABLED=false.",
+        "skeptic_status": "unverified",
+        "poc_uri": "",
+        "trace_uri": "",
+        "report_uri": "",
+        "scope_flag": "needs_scope_review",
+        "scope_note": "Could not map impact to an in-scope category from the description; review against the program's impacts-in-scope list.",
+        "created_at": "2026-10-15T06:52:47.088162",
+        "validated_at": null
+      },
+      {
+        "id": "68a6524d-0e07-4138-83df-009f6b326349",
+        "audit_id": "576d2d63-814f-4690-bdbb-4e4ecc5d374d",
+        "hypothesis_id": "c60dcf89-0922-473a-825a-c379fd2c9ef8",
+        "title": "Unsigned weight field in recoverBranch allows weight inflation without invalidating signatures",
+        "vulnerability_class": "Unsigned Field / SWC-117",
+        "severity": "high",
+        "confidence": 0.0,
+        "status": "unverified",
+        "affected_functions": [
+          "recoverBranch",
+          "recoverSapientSignature"
+        ],
+        "description": "1. Attacker observes a valid multi-sig transaction with a branch signature blob.\n2. In the signature blob, each signer's weight is encoded in the lower nibble of the flag byte (or a subsequent byte) \u2014 this weight is NOT included in _opHash (the signed message).\n3. Attacker modifies the weight nibble/byte for each signer entry in the signature blob (e.g., changing 0x01 to 0x0F for weight 15).\n4. ecrecover still recovers the correct address since _opHash is unchanged.\n5. The accumulated weight return value is inflated.\n6. If the caller checks weight >= threshold BEFORE verifying the merkle root against the stored imageHash, the threshold check passes with forged weights.\n7. Even if root is eventually checked, the inflated weight value may be used in intermediate logic or returned to callers that trust it independently.\n\n--- Consolidated attack vectors ---\n[Alt vector \u2014 Unsigned weight field in recoverBranch branch encoding allow]: 1. In recoverBranch, addrWeight is parsed directly from the _signature calldata bytes (either from the low nibble of firstByte or from a subsequent readUint8 call). 2. The ECDSA signature (r, s, v) signs only _opHash, which is derived from the Payload.Decoded struct. 3. The addrWeight is NOT include\n[Alt vector \u2014 ERC-1271 reentrancy during view-function signature recovery ]: 1. Attacker registers a malicious ERC-1271 contract as a signer in the wallet's signature tree (with sufficient weight). 2. When isValidSignature is called, recoverBranch reaches FLAG_SIGNATURE_ERC1271 and calls IERC1271(maliciousAddr).isValidSignature(opHash, sig). 3. The malicious contract's isVal\n[Alt vector \u2014 FLAG_ADDRESS nodes allow merkle root manipulation without we]: 1. Attacker constructs a signature tree where a legitimate signer's ECDSA signature (FLAG_SIGNATURE_HASH) is included with weight=1. 2. Attacker adds multiple FLAG_ADDRESS nodes with weight=0 (using the 4-bit free field set to 0000, then a dynamic weight byte of 0) for arbitrary addresses. 3. These ",
+        "poc_code": null,
+        "execution_trace": null,
+        "skeptic_notes": "Not validated: SKEPTIC_ENABLED=false.",
+        "skeptic_status": "unverified",
+        "poc_uri": "",
+        "trace_uri": "",
+        "report_uri": "",
+        "scope_flag": "needs_scope_review",
+        "scope_note": "Could not map impact to an in-scope category from the description; review against the program's impacts-in-scope list.",
+        "created_at": "2026-10-15T06:52:47.088167",
+        "validated_at": null
+      },
+      {
+        "id": "e5b5b93b-6c32-43d6-b1fa-c09b01b16524",
+        "audit_id": "576d2d63-814f-4690-bdbb-4e4ecc5d374d",
+        "hypothesis_id": "ab04d1dd-4c62-487e-aece-2972e923cbb2",
+        "title": "ECDSA signature malleability in readRSVCompact \u2014 no low-s check",
+        "vulnerability_class": "Signature Malleability",
+        "severity": "high",
+        "confidence": 0.0,
+        "status": "unverified",
+        "affected_functions": [
+          "readRSVCompact",
+          "recoverSapientSignature"
+        ],
+        "description": "1. User signs a payload producing signature (r, s, v) with s > secp256k1n/2. 2. Attacker computes s' = n - s and v' = v ^ 1, yielding an equally valid signature (r, s', v') that recovers to the same address. 3. If the protocol tracks used signatures by their raw bytes (e.g., blacklist or replay cache keyed on encodedSignature), the malleable variant bypasses the check. 4. Attacker submits the malleable signature to re-execute an already-consumed operation.",
+        "poc_code": null,
+        "execution_trace": null,
+        "skeptic_notes": "Not validated: SKEPTIC_ENABLED=false.",
+        "skeptic_status": "unverified",
+        "poc_uri": "",
+        "trace_uri": "",
+        "report_uri": "",
+        "scope_flag": "needs_scope_review",
+        "scope_note": "Could not map impact to an in-scope category from the description; review against the program's impacts-in-scope list.",
+        "created_at": "2026-10-15T06:52:47.088172",
+        "validated_at": null
+      },
+      {
+        "id": "1f90e161-5c68-4952-9d4f-f1ecc02eb564",
+        "audit_id": "576d2d63-814f-4690-bdbb-4e4ecc5d374d",
+        "hypothesis_id": "57885a91-55ea-44ca-ab85-bc5571581c64",
+        "title": "Cross-chain replay via _noChainId zeroing chainId in domain separator",
+        "vulnerability_class": "Missing Chain ID Binding (EIP-712)",
+        "severity": "high",
+        "confidence": 0.0,
+        "status": "unverified",
+        "affected_functions": [
+          "domainSeparator"
+        ],
+        "description": "1. User signs a message (e.g., recovery request) on Chain A where _noChainId=true is used, producing signature S. 2. The domain separator used is keccak256(abi.encode(TYPEHASH, name, version, 0, wallet)) \u2014 identical on every chain. 3. Attacker takes signature S and submits it on Chain B. 4. Chain B computes the same domain separator (chainId is also 0), so ecrecover succeeds. 5. The signed action executes on Chain B without user consent.\n\n--- Consolidated attack vectors ---\n[Alt vector \u2014 Caller-controlled _wallet parameter enables cross-contract d]: 1. Attacker identifies a call path where _wallet is derived from user input or msg.sender. 2. Attacker calls the function with _wallet set to a different contract address (VictimContract). 3. The computed domain separator matches what VictimContract would produce. 4. Attacker crafts a signature that\n[Alt vector \u2014 EIP-712 TYPEHASH may not match encoded fields causing silent]: 1. EIP712_DOMAIN_TYPEHASH is defined as keccak256 of a type string that does not exactly match 'EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)'. 2. Off-chain signers (ethers.js, web3) compute the standard domain separator using the canonical type string. 3. On-cha",
+        "poc_code": null,
+        "execution_trace": null,
+        "skeptic_notes": "Not validated: SKEPTIC_ENABLED=false.",
+        "skeptic_status": "unverified",
+        "poc_uri": "",
+        "trace_uri": "",
+        "report_uri": "",
+        "scope_flag": "needs_scope_review",
+        "scope_note": "Could not map impact to an in-scope category from the description; review against the program's impacts-in-scope list.",
+        "created_at": "2026-10-15T06:52:47.088176",
+        "validated_at": null
+      },
+      {
+        "id": "4cc2a51a-3592-4171-ae35-f0e0a964d3b2",
+        "audit_id": "576d2d63-814f-4690-bdbb-4e4ecc5d374d",
+        "hypothesis_id": "ad60be7f-cbf1-4a8a-94b1-1d3e8bf622b8",
+        "title": "Factory.deploy() callvalue() forwarded to uninitialized Wallet proxy enables fund theft",
+        "vulnerability_class": "SWC-132",
+        "severity": "high",
+        "confidence": 0.0,
+        "status": "unverified",
+        "affected_functions": [
+          "Factory.deploy",
+          "Wallet.creationCode (proxy constructor)",
+          "Hooks.receive"
+        ],
+        "description": "1. Attacker calls Factory.deploy(mainModule, salt) with a large msg.value (e.g., 10 ETH).\n2. The Factory passes callvalue() to CREATE2, forwarding all ETH to the newly created Wallet proxy.\n3. The Wallet proxy constructor (Huff bytecode) stores the mainModule address and returns runtime code, but performs NO initialization of auth, nonce, or reentrancy state.\n4. The proxy runtime code has a receive() function (from Hooks) that accepts ETH without any access control.\n5. Before the legitimate owner can interact with the wallet, the attacker (or any observer) can call execute() with a valid signature for their configuration, or if the imageHash is predictable, front-run the first transaction.\n6. Even without execute, the ETH sits in an uninitialized proxy with no owner-set access control, and the deployer has no special privilege to recover it.",
+        "poc_code": null,
+        "execution_trace": null,
+        "skeptic_notes": "Not validated: SKEPTIC_ENABLED=false.",
+        "skeptic_status": "unverified",
+        "poc_uri": "",
+        "trace_uri": "",
+        "report_uri": "",
+        "scope_flag": "out_of_scope",
+        "scope_note": "Matches a common program exclusion: MEV / sandwich / frontrunning. Verify against the program's rules.",
+        "created_at": "2026-10-15T06:52:47.088181",
+        "validated_at": null
+      },
+      {
+        "id": "da54d690-5c60-4246-bcc8-71f60d6c2e6c",
+        "audit_id": "576d2d63-814f-4690-bdbb-4e4ecc5d374d",
+        "hypothesis_id": "4155e1fb-79d9-4b54-ab84-757d3687524c",
+        "title": "Nonce field defaults to 0 when nonceSize flag is 0 \u2014 potential unsigned/fallback sentinel in packed payload",
+        "vulnerability_class": "Unsigned Field / Signature Fallback Sentinel",
+        "severity": "high",
+        "confidence": 0.0,
+        "status": "unverified",
+        "affected_functions": [
+          "fromPackedCalls",
+          "signatureValidation",
+          "_consumeNonce",
+          "execute"
+        ],
+        "description": "1. In fromPackedCalls, the 3-bit nonceSize field is extracted from globalFlag: nonceSize = (globalFlag >> 1) & 0x07. 2. When nonceSize == 0, the nonce is never read from the packed bytes and _decoded.nonce remains at its Solidity default of 0. 3. If the toEIP712 struct hash does not explicitly include the nonce (or encodes it in a way that omits it when zero), the nonce is an unsigned field \u2014 the attacker can modify the packed payload bytes to set any nonceSize/nonce value without invalidating the signature. 4. Even if nonce IS in the hash, the implicit default of 0 acts as a fallback sentinel: any signer creating a standard-format signature with nonceSize=0 is implicitly signing nonce=0, which may not be the signer's intent. 5. _consumeNonce checks currentNonce == _nonce and increments, so the first call in any space (currentNonce=0) will succeed with the default nonce=0 without the signer having explicitly encoded a nonce in the payload.",
+        "poc_code": null,
+        "execution_trace": null,
+        "skeptic_notes": "Not validated: SKEPTIC_ENABLED=false.",
+        "skeptic_status": "unverified",
+        "poc_uri": "",
+        "trace_uri": "",
+        "report_uri": "",
+        "scope_flag": "needs_scope_review",
+        "scope_note": "Could not map impact to an in-scope category from the description; review against the program's impacts-in-scope list.",
+        "created_at": "2026-10-15T06:52:47.088185",
+        "validated_at": null
+      },
+      {
+        "id": "79b48af1-a840-4431-a54b-fd1b66d2b16c",
+        "audit_id": "576d2d63-814f-4690-bdbb-4e4ecc5d374d",
+        "hypothesis_id": "c84f5a51-2099-44a3-be65-9739471c7583",
+        "title": "Hooks fallback delegatecall allows hook contracts to hijack Wallet proxy implementation slot",
+        "vulnerability_class": "SWC-112",
+        "severity": "critical",
+        "confidence": 0.0,
+        "status": "unverified",
+        "affected_functions": [
+          "Hooks.fallback",
+          "Hooks.addHook",
+          "Implementation._setImplementation",
+          "Wallet proxy (sstore at address())"
+        ],
+        "description": "1. The Wallet proxy stores its implementation address at storage slot = address(this) (the proxy's own address), per the Huff constructor: `sstore(address(), _imp)`.\n2. Hooks.addHook() writes hook addresses to storage at keccak256(HOOKS_KEY, selector).\n3. Hooks.fallback() reads a hook address and performs delegatecall to it with arbitrary msg.data.\n4. A malicious hook contract (or a legitimate hook with a vulnerability) can execute `sstore(proxyAddress, maliciousImplementation)` during the delegatecall, overwriting the proxy's implementation pointer.\n5. All subsequent calls to the wallet will delegatecall to the attacker's implementation, giving full control over the wallet and all its assets.\n6. Since addHook is onlySelf, the attacker needs the wallet to approve adding the malicious hook - but a hook with a subtle vulnerability could be added legitimately and then exploited later.",
+        "poc_code": null,
+        "execution_trace": null,
+        "skeptic_notes": "Not validated: SKEPTIC_ENABLED=false.",
+        "skeptic_status": "unverified",
+        "poc_uri": "",
+        "trace_uri": "",
+        "report_uri": "",
+        "scope_flag": "known_issue",
+        "scope_note": "Strong overlap with the project's declared known-issues section.",
+        "created_at": "2026-10-15T06:52:47.088189",
+        "validated_at": null
+      },
+      {
+        "id": "0a1f92c4-34a0-4424-a44b-9894707e01a1",
+        "audit_id": "576d2d63-814f-4690-bdbb-4e4ecc5d374d",
+        "hypothesis_id": "b286f48a-d89e-4e2f-aed3-5289ab1a372e",
+        "title": "Chained signature final checkpoint not validated against snapshot in non-chained path",
+        "vulnerability_class": "SWC-115",
+        "severity": "high",
+        "confidence": 0.0,
+        "status": "unverified",
+        "affected_functions": [
+          "BaseSig.recover",
+          "BaseSig.recoverChained"
+        ],
+        "description": "1. Attacker observes a valid signature with a snapshot (imageHash checkpointer) that has checkpoint=100 and imageHash=X.\n2. Attacker crafts a NON-chained signature (flag bits [1..0] = 00) that includes the same checkpointer address and checkpointer data.\n3. In `recover()`, the snapshot is fetched: snapshot.imageHash=X, snapshot.checkpoint=100.\n4. The attacker sets checkpoint=50 (less than 100) in the signature, and provides a valid signature tree for a DIFFERENT imageHash Y (not X).\n5. The final check `if (snapshot.imageHash != bytes32(0) && snapshot.imageHash != imageHash && checkpoint <= snapshot.checkpoint)` evaluates: X != 0 (true) && X != Y (true) && 50 <= 100 (true) \u2192 reverts.\n6. However, if the attacker sets checkpoint=101 (> 100), the check passes: 101 <= 100 is false \u2192 no revert.\n7. This means a signature with a HIGHER checkpoint than the snapshot can use a DIFFERENT imageHash, effectively bypassing the snapshot's configuration binding.\n8. The attacker can use any valid signature tree (for any configuration) as long as they set a checkpoint higher than the snapshot's checkpoint, potentially authorizing transactions with a configuration that was never approved for this checkpoint range.",
+        "poc_code": null,
+        "execution_trace": null,
+        "skeptic_notes": "Not validated: SKEPTIC_ENABLED=false.",
+        "skeptic_status": "unverified",
+        "poc_uri": "",
+        "trace_uri": "",
+        "report_uri": "",
+        "scope_flag": "known_issue",
+        "scope_note": "Project docs list a known issue referencing `recover` \u2014 likely accepted/out of scope.",
+        "created_at": "2026-10-15T06:52:47.088194",
+        "validated_at": null
+      },
+      {
+        "id": "3b4a234b-ff5a-475d-ad28-031daae85156",
+        "audit_id": "576d2d63-814f-4690-bdbb-4e4ecc5d374d",
+        "hypothesis_id": "663c5928-7760-402d-b524-df7e370d8fea",
+        "title": "Chained signature checkpoint=0 bypasses snapshot checkpoint enforcement",
+        "vulnerability_class": "SWC-115",
+        "severity": "high",
+        "confidence": 0.0,
+        "status": "unverified",
+        "affected_functions": [
+          "recoverChained",
+          "recover"
+        ],
+        "description": "1. Attacker obtains a valid signature for a config update at checkpoint=100 (old config with higher threshold). 2. Attacker crafts a chained signature where the final (outermost) signature has checkpointSize=0 in its flag byte (bits [4..2]=000), causing readUintX to return checkpoint=0 without consuming bytes. 3. The inner signature has a valid imageHash and sufficient weight. 4. In recoverChained, the final checkpoint stored is 0. 5. The snapshot check `checkpoint <= _snapshot.checkpoint` evaluates to `0 <= N` which is always true, BUT if the snapshot imageHash was matched by any intermediate signature, `_snapshot.imageHash` is zeroed and the check is skipped entirely. 6. Even without snapshot match, if the checkpointer returns checkpoint=0, the attacker's old config signature (checkpoint=100) passes the inner weight check, and the outer signature with checkpoint=0 passes the snapshot check since 0 <= any_checkpoint. This allows using an old high-threshold config to authorize actions that the new low-threshold config shouldn't allow.\n\n--- Consolidated attack vectors ---\n[Alt vector \u2014 recoverChained: snapshot checkpoint bypass when snapshot ima]: 1. Attacker identifies a wallet with a stored snapshot (imageHash_A, checkpoint=100) on a checkpointer.\n2. Attacker constructs a chained signature with two entries: first entry produces imageHash_A with checkpoint=50, second entry produces imageHash_B with checkpoint=30.\n3. During recoverChained ite\n[Alt vector \u2014 Chained signature final checkpoint vs snapshot check uses wr]: 1. Attacker crafts a chained signature (signatureFlag & 0x01 == 0x01) with exactly one inner signature.\n2. The single inner signature has a valid weight >= threshold and an imageHash that does NOT match the snapshot's imageHash.\n3. After the while loop exits, `checkpoint` holds the single signature'\n[Alt vector \u2014 recoverChained: Snapshot imageHash consumed by intermediate ]: 1. Wallet has a snapshot with imageHash=A and checkpoint=100, representing a known good configuration.\n2. Attacker constructs a chained signature with two links: Link1 (newest, checkpoint=50) and Link0 (oldest, checkpoint=200).\n3. Link0 is processed first (prevCheckpoint=max). recover() returns imag",
+        "poc_code": null,
+        "execution_trace": null,
+        "skeptic_notes": "Not validated: SKEPTIC_ENABLED=false.",
+        "skeptic_status": "unverified",
+        "poc_uri": "",
+        "trace_uri": "",
+        "report_uri": "",
+        "scope_flag": "known_issue",
+        "scope_note": "Project docs list a known issue referencing `recover` \u2014 likely accepted/out of scope.",
+        "created_at": "2026-10-15T06:52:47.088198",
+        "validated_at": null
+      },
+      {
+        "id": "b947168c-a870-4091-8ee7-176215d9b2c1",
+        "audit_id": "576d2d63-814f-4690-bdbb-4e4ecc5d374d",
+        "hypothesis_id": "cdd2277b-81b4-409e-8d37-289ec0311f5f",
+        "title": "recover: Checkpointer address read from signature data when _checkpointer is address(0) enables imageHash manipulation in chained signatures",
+        "vulnerability_class": "SWC-115 (Authorization)",
+        "severity": "high",
+        "confidence": 0.0,
+        "status": "unverified",
+        "affected_functions": [
+          "recover",
+          "recoverChained"
+        ],
+        "description": "1. In recoverChained, for all signatures except the last, `checkpointer` is set to `address(0)`.\n2. When recover() is called with `_checkpointer = address(0)` and the signature flag has bit 0x40 set, the checkpointer address is read FROM THE SIGNATURE DATA itself: `(_checkpointer, rindex) = _signature.readAddress(rindex)`.\n3. Since `_ignoreCheckpointer` is true, the checkpointer's snapshotFor() is NOT called, but the attacker-chosen checkpointer address IS included in the imageHash: `imageHash = LibOptim.fkeccak256(imageHash, bytes32(uint256(uint160(_checkpointer))))`.\n4. An attacker can embed different checkpointer addresses in different chained signature links, producing different imageHashes than what the legitimate signers intended.\n5. This allows the attacker to make a chained signature's imageHash NOT match the on-chain stored imageHash, potentially bypassing snapshot validation or creating a configuration that appears valid under one checkpointer but is evaluated under another.\n6. Since the checkpointer is never actually called (ignoreCheckpointer=true), the attacker doesn't need the checkpointer to be a real contract - any address can be used to manipulate the imageHash.\n\n--- Consolidated attack vectors ---\n[Alt vector \u2014 noChainId flag parsed from unsigned signature byte alters EI]: In recover(), the signature flag byte (first byte of _signature) is parsed BEFORE any cryptographic verification. Bit 1 of this flag sets _payload.noChainId = (signatureFlag & 0x02 == 0x02). This noChainId value is then passed into _payload.hash() which calls domainSeparator(_decoded.noChainId, addr",
+        "poc_code": null,
+        "execution_trace": null,
+        "skeptic_notes": "Not validated: SKEPTIC_ENABLED=false.",
+        "skeptic_status": "unverified",
+        "poc_uri": "",
+        "trace_uri": "",
+        "report_uri": "",
+        "scope_flag": "known_issue",
+        "scope_note": "Project docs list a known issue referencing `recover` \u2014 likely accepted/out of scope.",
+        "created_at": "2026-10-15T06:52:47.088202",
+        "validated_at": null
+      },
+      {
+        "id": "b7c985d1-e74e-432f-8b14-ce6298e5185e",
+        "audit_id": "576d2d63-814f-4690-bdbb-4e4ecc5d374d",
+        "hypothesis_id": "13aca2b2-44be-4f85-bb67-ba67cae04880",
+        "title": "Missing domain separator in attestation toHash enables cross-chain/cross-contract replay",
+        "vulnerability_class": "Missing Domain Separator",
+        "severity": "high",
+        "confidence": 0.0,
+        "status": "unverified",
+        "affected_functions": [
+          "toHash",
+          "toPackAuthData",
+          "recoverSapientSignature"
+        ],
+        "description": "1. Signer creates an Attestation authorizing a session signer for a specific wallet on chain A. 2. toHash computes keccak256(toPacked(attestation)) with no chain ID, contract address, or EIP-712 domain separator. 3. Attacker observes the attestation on chain A and replays the identical signature on chain B (or against a different SessionManager deployment). 4. Because the hash is chain/contract-agnostic, ecrecover succeeds and the attestation is accepted on the unintended target.",
+        "poc_code": null,
+        "execution_trace": null,
+        "skeptic_notes": "Not validated: SKEPTIC_ENABLED=false.",
+        "skeptic_status": "unverified",
+        "poc_uri": "",
+        "trace_uri": "",
+        "report_uri": "",
+        "scope_flag": "needs_scope_review",
+        "scope_note": "Could not map impact to an in-scope category from the description; review against the program's impacts-in-scope list.",
+        "created_at": "2026-10-15T06:52:47.088207",
+        "validated_at": null
+      },
+      {
+        "id": "22b22b99-10b2-4c6a-bd1d-2c0866713b95",
+        "audit_id": "576d2d63-814f-4690-bdbb-4e4ecc5d374d",
+        "hypothesis_id": "09c3f062-8617-41d9-a236-a27d38958aff",
+        "title": "signatureValidation function truncated \u2014 unable to verify all Decoded fields are included in signed hash",
+        "vulnerability_class": "Unsigned Field (Investigation Required)",
+        "severity": "critical",
+        "confidence": 0.0,
+        "status": "unverified",
+        "affected_functions": [
+          "signatureValidation",
+          "hash",
+          "toEIP712"
+        ],
+        "description": "The signatureValidation function (score=112.0, highest in the slice) is truncated and its full implementation is not visible. The hash() function delegates to toEIP712() which is also not visible. Without seeing toEIP712, it is impossible to confirm that all fields extracted from the packed payload (space, nonce, calls[].to, calls[].value, calls[].data, calls[].gasLimit, calls[].delegateCall, calls[].onlyFallback, calls[].behaviorOnError) are included in the signed struct hash. Any field extracted from the packed payload but omitted from toEIP712 is an unsigned field that an attacker can modify without invalidating the signature.\n\n--- Consolidated attack vectors ---\n[Alt vector \u2014 Static signature caller check bypass via ERC-4337 handleOps ]: 1. Wallet owner calls setStaticSignature(hash, address(0), farFutureTimestamp) \u2014 setting addr=address(0) means 'any caller allowed'. 2. Attacker crafts a UserOp with arbitrary callData (e.g., transfer all ETH/tokens) and uses the static signature bytes (flag 0x80 + the hash). 3. Attacker submits the\n[Alt vector \u2014 Static signature expiration relies on miner-manipulable bloc]: 1. A static signature is registered with an expiration timestamp T that is close to the current time.\n2. A miner (or validator) who is also the attacker constructs a block containing a transaction that uses this static signature.\n3. The miner sets block.timestamp to T-1 (within the ~15-second manipu",
+        "poc_code": null,
+        "execution_trace": null,
+        "skeptic_notes": "Not validated: SKEPTIC_ENABLED=false.",
+        "skeptic_status": "unverified",
+        "poc_uri": "",
+        "trace_uri": "",
+        "report_uri": "",
+        "scope_flag": "known_issue",
+        "scope_note": "Project docs list a known issue referencing `hash` \u2014 likely accepted/out of scope.",
+        "created_at": "2026-10-15T06:52:47.088211",
+        "validated_at": null
+      },
+      {
+        "id": "4f378c8c-420a-4a7c-80a8-bb6a47333c5c",
+        "audit_id": "576d2d63-814f-4690-bdbb-4e4ecc5d374d",
+        "hypothesis_id": "cb5842fd-e2b3-47be-99a6-eaf0d151d79a",
+        "title": "Stage1Auth one-way upgrade to Stage2Module creates permanent validation bypass window",
+        "vulnerability_class": "SWC-124",
+        "severity": "high",
+        "confidence": 0.0,
+        "status": "unverified",
+        "affected_functions": [
+          "Stage1Auth._updateImageHash",
+          "Stage1Auth._isValidImage",
+          "Stage2Auth._isValidImage",
+          "Implementation._updateImplementation"
+        ],
+        "description": "1. Stage1Auth._isValidImage() validates imageHash by computing CREATE2(FACTORY, imageHash, INIT_CODE_HASH) and comparing to address(this). This ties the wallet to a specific Factory and mainModule.\n2. When updateImageHash() is called, Stage1Auth writes the new imageHash AND upgrades the implementation to STAGE_2_IMPLEMENTATION in the same transaction.\n3. Stage2Auth._isValidImage() simply checks `_imageHash == Storage.readBytes32(IMAGE_HASH_KEY)` - it no longer validates against the Factory or CREATE2 address.\n4. After upgrade, any imageHash can be set (including ones that don't correspond to the original Factory-deployed address), because Stage2Auth dropped the CREATE2 validation.\n5. If an attacker can get the wallet to call updateImageHash with a crafted imageHash that includes them as a signer, they gain full control.\n6. The upgrade is one-way and irreversible - there is no mechanism to downgrade back to Stage1Auth's stricter validation.",
+        "poc_code": null,
+        "execution_trace": null,
+        "skeptic_notes": "Not validated: SKEPTIC_ENABLED=false.",
+        "skeptic_status": "unverified",
+        "poc_uri": "",
+        "trace_uri": "",
+        "report_uri": "",
+        "scope_flag": "needs_scope_review",
+        "scope_note": "Could not map impact to an in-scope category from the description; review against the program's impacts-in-scope list.",
+        "created_at": "2026-10-15T06:52:47.088216",
+        "validated_at": null
+      },
+      {
+        "id": "8b05ecf0-4d36-44ff-9366-2da641707a6a",
+        "audit_id": "576d2d63-814f-4690-bdbb-4e4ecc5d374d",
+        "hypothesis_id": "a776bb74-0d63-46d2-b7fa-aa32aeb1735d",
+        "title": "recoverSapientSignature: memory payload mutation leaks modified parentWallets to subsequent sapient calls in same transaction",
+        "vulnerability_class": "SWC-105 (Unprotected Ether Withdrawal)",
+        "severity": "medium",
+        "confidence": 0.0,
+        "status": "unverified",
+        "affected_functions": [
+          "recoverSapientSignature",
+          "recoverBranch"
+        ],
+        "description": "1. A signature tree contains two FLAG_SIGNATURE_SAPIENT entries pointing to sapient contracts A and B.\n2. recoverBranch processes sapient A first: calls ISapient(A).recoverSapientSignature(_payload, sig_A).\n3. Inside recoverSapientSignature on contract A, _payload.parentWallets is mutated in memory to append msg.sender (the wallet address).\n4. Since _payload is passed as `memory` (not `calldata`), this mutation persists in the calling context's memory.\n5. When recoverBranch processes sapient B, it calls ISapient(B).recoverSapientSignature(_payload, sig_B) with the ALREADY-MODIFIED _payload that now includes the wallet address in parentWallets.\n6. Sapient contract B validates against a payload with an extra parentWallet that wasn't in the original configuration, potentially causing it to compute a different imageHash than intended.\n7. If B's validation logic depends on the exact set of parentWallets (e.g., for domain separation or multi-wallet authorization), this could lead to incorrect validation results.\n\n--- Consolidated attack vectors ---\n[Alt vector \u2014 Implicit call external call to attacker-controlled target be]: 1. Attacker crafts a payload with an implicit call at index 0 targeting a malicious contract they control, followed by explicit calls that consume usage limits.\n2. During recoverSapientSignature, the loop processes call[0] (implicit) first, reaching _validateImplicitCall which calls ISignalsImplicit\n[Alt vector \u2014 Session signer reuse across implicit and explicit calls bypa]: 1. A session signer is configured with both implicit attestation capabilities AND explicit session permissions with a valueLimit.\n2. The attacker (who controls this session signer) creates a payload with: call[0] = incrementUsageLimit (explicit, callIdx=0), call[1..N] = implicit calls with value=0 (",
+        "poc_code": null,
+        "execution_trace": null,
+        "skeptic_notes": "Not validated: SKEPTIC_ENABLED=false.",
+        "skeptic_status": "unverified",
+        "poc_uri": "",
+        "trace_uri": "",
+        "report_uri": "",
+        "scope_flag": "known_issue",
+        "scope_note": "Strong overlap with the project's declared known-issues section.",
+        "created_at": "2026-10-15T06:52:47.088220",
+        "validated_at": null
+      },
+      {
+        "id": "3fb040e6-ccb2-4104-8add-be7a9fe934fa",
+        "audit_id": "576d2d63-814f-4690-bdbb-4e4ecc5d374d",
+        "hypothesis_id": "f71d8819-fe35-4f30-9d4a-fb2bb990a0e7",
+        "title": "SessionManager view-only validation allows TOCTOU on usage limits across batched calls",
+        "vulnerability_class": "SWC-124",
+        "severity": "medium",
+        "confidence": 0.0,
+        "status": "unverified",
+        "affected_functions": [
+          "SessionManager.recoverSapientSignature",
+          "ExplicitSessionManager._validateExplicitCall",
+          "ExplicitSessionManager._validateLimitUsageIncrement",
+          "ExplicitSessionManager.incrementUsageLimit",
+          "PermissionValidator.validatePermission"
+        ],
+        "description": "1. SessionManager.recoverSapientSignature() is a `view` function called during signature validation in BaseAuth.signatureValidation().\n2. During this view call, it computes expected usage limit increments and validates them against the current state.\n3. It expects the first call in the payload to be incrementUsageLimit() which will persist the new limits.\n4. However, the view validation reads `getLimitUsage()` from storage, computes expected new values, and returns.\n5. During actual execution in Calls._execute(), if any call BEFORE incrementUsageLimit modifies the limitUsage storage (e.g., via a hook delegatecall or a call to another contract that calls back to incrementUsageLimit), the pre-validated limits become stale.\n6. The incrementUsageLimit call then writes values that were validated against stale state, potentially allowing usage limit bypass.\n7. The SessionManager bans ABORT_ON_ERROR but does not ban IGNORE_ERROR for the increment call itself, and the onlyFallback check in _validateLimitUsageIncrement can be bypassed if the preceding call fails with IGNORE_ERROR.",
+        "poc_code": null,
+        "execution_trace": null,
+        "skeptic_notes": "Not validated: SKEPTIC_ENABLED=false.",
+        "skeptic_status": "unverified",
+        "poc_uri": "",
+        "trace_uri": "",
+        "report_uri": "",
+        "scope_flag": "known_issue",
+        "scope_note": "Strong overlap with the project's declared known-issues section.",
+        "created_at": "2026-10-15T06:52:47.088224",
+        "validated_at": null
+      },
+      {
+        "id": "98f3a2e6-4889-4af2-b563-2f415f31ac62",
+        "audit_id": "576d2d63-814f-4690-bdbb-4e4ecc5d374d",
+        "hypothesis_id": "8be1f7c6-1bf8-41ef-a6f7-f1491f1a23f5",
+        "title": "Guest and Calls inconsistent delegateCall handling enables bypass via fallback dispatch",
+        "vulnerability_class": "SWC-124",
+        "severity": "medium",
+        "confidence": 0.0,
+        "status": "unverified",
+        "affected_functions": [
+          "Guest._dispatchGuest",
+          "Calls._execute",
+          "Guest.fallback"
+        ],
+        "description": "1. Guest._dispatchGuest() explicitly reverts on delegateCall: `if (call.delegateCall) revert DelegateCallNotAllowed(i)`.\n2. Calls._execute() allows delegateCall and forwards to IDelegatedExtension.handleSequenceDelegateCall.\n3. If Guest is used as a fallback handler for the wallet (e.g., via Hooks or direct fallback), an attacker can route calls through Guest that should be restricted, or route calls through Calls that Guest was meant to restrict.\n4. Specifically, if a session signer's permissions are validated assuming Guest's restrictions (no delegatecall), but execution happens through Calls (which allows delegatecall), the session signer can execute delegatecalls that were assumed to be impossible.\n5. This creates an assumption mismatch: SessionManager validates calls assuming certain restrictions that differ between Guest and Calls execution paths.",
+        "poc_code": null,
+        "execution_trace": null,
+        "skeptic_notes": "Not validated: SKEPTIC_ENABLED=false.",
+        "skeptic_status": "unverified",
+        "poc_uri": "",
+        "trace_uri": "",
+        "report_uri": "",
+        "scope_flag": "below_paid_tier",
+        "scope_note": "Severity 'medium' is often below the paid tier (many programs pay only High/Critical for smart contracts). Verify program tiers.",
+        "created_at": "2026-10-15T06:52:47.088228",
+        "validated_at": null
+      },
+      {
+        "id": "9f11a8d1-7744-4efa-9552-257900a11474",
+        "audit_id": "576d2d63-814f-4690-bdbb-4e4ecc5d374d",
+        "hypothesis_id": "cc9dce00-dd11-488d-94da-5da27f7f111c",
+        "title": "Hash collision in _leafForSapient via abi.encodePacked with bytes32 prefix string",
+        "vulnerability_class": "SWC-133 (Hash Collision)",
+        "severity": "low",
+        "confidence": 0.0,
+        "status": "unverified",
+        "affected_functions": [
+          "BaseSig._leafForSapient",
+          "BaseSig._leafForAddressAndWeight"
+        ],
+        "description": "1. _leafForSapient computes keccak256(abi.encodePacked('Sequence sapient config:\\n', _addr, _weight, _imageHash)).\n2. While _addr (20 bytes), _weight (32 bytes), and _imageHash (32 bytes) are all fixed-length, the string literal 'Sequence sapient config:\\n' is 25 bytes and 'Sequence signer:\\n' is 16 bytes.\n3. An attacker controlling _addr and _weight in _leafForAddressAndWeight could attempt to craft values such that the packed encoding of ('Sequence signer:\\n', addr, weight) collides with a packed encoding of ('Sequence sapient config:\\n', addr', weight', imageHash') from _leafForSapient.\n4. Since the prefix strings differ in length (16 vs 25 bytes) and all subsequent fields are fixed-width, a direct cross-function collision requires the 16-byte prefix + 20-byte addr + first 9 bytes of weight to equal the 25-byte prefix + first 20 bytes of addr', which is computationally infeasible.\n5. However, if additional leaf types are added in the future with different-length prefixes but overlapping field layouts, the use of abi.encodePacked without a delimiter or type tag becomes exploitable. This is a design-level weakness.",
+        "poc_code": null,
+        "execution_trace": null,
+        "skeptic_notes": "Not validated: SKEPTIC_ENABLED=false.",
+        "skeptic_status": "unverified",
+        "poc_uri": "",
+        "trace_uri": "",
+        "report_uri": "",
+        "scope_flag": "below_paid_tier",
+        "scope_note": "Severity 'low' is often below the paid tier (many programs pay only High/Critical for smart contracts). Verify program tiers.",
+        "created_at": "2026-10-15T06:52:47.088233",
+        "validated_at": null
+      },
+      {
+        "id": "b6e17675-0e61-484f-b38c-f2c604e18384",
+        "audit_id": "576d2d63-814f-4690-bdbb-4e4ecc5d374d",
+        "hypothesis_id": "26bc9708-bbee-4d19-ae55-6149cb6ba168",
+        "title": "abi.encodePacked with string type enables potential hash collision if prefix becomes variable",
+        "vulnerability_class": "SWC-133",
+        "severity": "low",
+        "confidence": 0.0,
+        "status": "unverified",
+        "affected_functions": [
+          "_leafForRecoveryLeaf"
+        ],
+        "description": "1. The function uses abi.encodePacked with a string argument, which omits length prefixes for variable-length types.\n2. Currently the string is a constant literal (24 bytes) followed by fixed-size types, so no immediate collision exists.\n3. If a future code change makes the prefix variable, or adds another leaf function with a different-length prefix, an attacker can craft two different inputs that produce the same keccak256 hash by shifting bytes across the string/address boundary.\n4. Example: prefix 'AB' + signer starting with 0xCD... could equal prefix 'ABC' + signer starting with 0xD...",
+        "poc_code": null,
+        "execution_trace": null,
+        "skeptic_notes": "Not validated: SKEPTIC_ENABLED=false.",
+        "skeptic_status": "unverified",
+        "poc_uri": "",
+        "trace_uri": "",
+        "report_uri": "",
+        "scope_flag": "below_paid_tier",
+        "scope_note": "Severity 'low' is often below the paid tier (many programs pay only High/Critical for smart contracts). Verify program tiers.",
+        "created_at": "2026-10-15T06:52:47.088237",
+        "validated_at": null
+      },
+      {
+        "id": "5bdec99e-01ed-4807-9ad8-4537390157e8",
+        "audit_id": "576d2d63-814f-4690-bdbb-4e4ecc5d374d",
+        "hypothesis_id": "fdba384e-22cb-4446-983e-f651c3e1a0f4",
+        "title": "Attack chain: Chained Signature Checkpoint Bypass via Attacker-Controlled Checkpointer",
+        "vulnerability_class": "Attack Chain",
+        "severity": "critical",
+        "confidence": 0.7,
+        "status": "unverified",
+        "affected_functions": [
+          "recoverChained",
+          "recover"
+        ],
+        "description": "1. Attacker obtains a valid chained signature for a configuration update at a high checkpoint (e.g., checkpoint=100 with a high-threshold multi-sig config). 2. Attacker crafts a new chained signature where the outermost (final) signature has checkpointSize=0 in its flag byte (bits [4..2]=000), causing recoverChained to skip snapshot checkpoint enforcement entirely (H9). 3. For all non-final signatures in the chain, recoverChained passes _checkpointer=address(0) to recover(). When recover() sees _checkpointer=address(0) and flag bit 0x40 is set, it reads the checkpointer address directly FROM the attacker-controlled signature data (H10). 4. Attacker embeds a malicious checkpointer contract address in the signature bytes. This contract's imageHash() function returns whatever imageHash the attacker needs to pass validation. 5. The combined effect \u2014 bypassing checkpoint enforcement AND controlling the checkpointer \u2014 allows the attacker to forge authorization for any configuration change, including lowering the signing threshold to 1-of-1 and taking full control of the wallet. Neither H9 nor H10 alone achieves this: H9 without H10 still requires a legitimate checkpointer, and H10 without H9 is blocked by checkpoint enforcement.\n\nChain steps:\n  1. recoverChained: Craft chained signature with checkpointSize=0 in final signature flag byte \u2192 Snapshot checkpoint enforcement is completely skipped for the final signature\n  2. recover (called from recoverChained with _checkpointer=address(0)): Embed malicious checkpointer address in signature data with flag bit 0x40 set \u2192 recover() reads checkpointer from attacker-controlled signature bytes instead of using a trusted address\n  3. recover (imageHash validation): Malicious checkpointer contract returns attacker-chosen imageHash \u2192 Authorization check passes with attacker-forged imageHash, enabling arbitrary config changes like threshold reduction to 1-of-1\n\nRoot cause: recoverChained passes address(0) as checkpointer for non-final signatures, and checkpoint=0 skips enforcement, allowing attacker to supply arbitrary checkpointer from signature data\n\nComposed from: [9] Chained signature checkpoint=0 bypasses snapshot checkpoint ; [10] recover: Checkpointer address read from signature data when ",
+        "poc_code": null,
+        "execution_trace": null,
+        "skeptic_notes": "Not validated: SKEPTIC_ENABLED=false.",
+        "skeptic_status": "unverified",
+        "poc_uri": "",
+        "trace_uri": "",
+        "report_uri": "",
+        "scope_flag": "known_issue",
+        "scope_note": "Project docs list a known issue referencing `recover` \u2014 likely accepted/out of scope.",
+        "created_at": "2026-10-15T06:52:47.088241",
+        "validated_at": null
+      },
+      {
+        "id": "54e35ae5-7c88-479c-b1a5-8f0d79f56075",
+        "audit_id": "576d2d63-814f-4690-bdbb-4e4ecc5d374d",
+        "hypothesis_id": "cfd7d414-a16c-41a4-8e97-3791692f3b2c",
+        "title": "Attack chain: Unsigned EIP-712 Fields + Nonce Default Enable Persistent Signature Replay with DelegateCall Hijack",
+        "vulnerability_class": "Attack Chain",
+        "severity": "critical",
+        "confidence": 0.7,
+        "status": "unverified",
+        "affected_functions": [
+          "execute",
+          "fromPackedCalls",
+          "hash",
+          "signatureValidation",
+          "_consumeNonce"
+        ],
+        "description": "1. A legitimate user signs a transaction payload via the wallet's EIP-712 signature scheme. The toEIP712() function omits fields like delegateCall, onlyFallback, behaviorOnError, and gasLimit from the struct hash (H0). 2. The attacker intercepts this signed payload and modifies it: sets nonceSize=0 in the globalFlag (3-bit field), which causes fromPackedCalls to never read a nonce from the packed bytes, leaving _decoded.nonce at its Solidity default of 0 (H6). 3. The attacker also flips the delegateCall flag from false to true in the unsigned portion of the payload. Since neither the nonce nor delegateCall are covered by the signature hash, the modified payload still passes signature validation. 4. The attacker submits this payload to execute(). Because nonce is always 0, the same modified payload can be replayed indefinitely across multiple transactions. The delegateCall=true routes execution through a delegatecall path, potentially allowing the attacker to execute arbitrary code in the wallet's context. 5. H0 alone allows field mutation but nonce tracking could prevent replay; H6 alone forces nonce=0 but signed fields can't be mutated. Together they enable persistent, replayable payload mutation.\n\nChain steps:\n  1. fromPackedCalls: Attacker modifies intercepted signed payload: sets nonceSize=0 in globalFlag and flips delegateCall to true \u2192 Nonce defaults to 0 (never consumed from payload) and delegateCall is mutated, both outside the signed hash\n  2. signatureValidation: Submit modified payload for validation \u2192 Signature verification passes because neither nonce nor delegateCall are included in the EIP-712 struct hash\n  3. execute: Execute the mutated payload with delegateCall=true and nonce=0 \u2192 DelegateCall executes attacker code in wallet context; nonce=0 allows indefinite replay of the same payload\n\nRoot cause: toEIP712 omits delegateCall/gasLimit from struct hash, and nonceSize=0 causes nonce to default to 0, together enabling replayable mutated payloads\n\nComposed from: [0] Unsigned fields in toEIP712 struct hash \u2014 delegateCall/onlyF; [6] Nonce field defaults to 0 when nonceSize flag is 0 \u2014 potenti",
+        "poc_code": null,
+        "execution_trace": null,
+        "skeptic_notes": "Not validated: SKEPTIC_ENABLED=false.",
+        "skeptic_status": "unverified",
+        "poc_uri": "",
+        "trace_uri": "",
+        "report_uri": "",
+        "scope_flag": "known_issue",
+        "scope_note": "Project docs list a known issue referencing `hash` \u2014 likely accepted/out of scope.",
+        "created_at": "2026-10-15T06:52:47.088246",
+        "validated_at": null
+      },
+      {
+        "id": "36ac9aa9-fa55-4ec9-bd08-df18e27de5d6",
+        "audit_id": "576d2d63-814f-4690-bdbb-4e4ecc5d374d",
+        "hypothesis_id": "52da50d4-4db0-4e69-919c-a43a4613591a",
+        "title": "Attack chain: Weight Inflation + Sapient Memory Mutation Leak Unauthorized Wallet Access",
+        "vulnerability_class": "Attack Chain",
+        "severity": "high",
+        "confidence": 0.7,
+        "status": "unverified",
+        "affected_functions": [
+          "recoverBranch",
+          "recoverSapientSignature"
+        ],
+        "description": "1. Attacker observes a valid multi-sig transaction with a branch signature blob where signers have specific weights encoded in the signature (e.g., lower nibble of flag byte). The weight field is NOT included in _opHash (H2). 2. Attacker modifies the signature blob, inflating the weight of a single signer they control from 1 to a value that meets the threshold (e.g., from 1 to 10 when threshold is 10). Since weight is unsigned, recoverBranch accepts the inflated weight without invalidating the signature. 3. recoverBranch calls recoverSapientSignature on a sapient contract in the signature tree. Inside this call, the sapient contract mutates the _payload in memory (H14). The mutated payload \u2014 containing modified parentWallets data \u2014 leaks back to the caller. 4. When a second sapient contract B is processed in the same signature tree, it receives the already-mutated payload from step 3. The leaked parentWallets modifications can grant the attacker unauthorized access to parent wallet operations or bypass authorization checks in sapient B. 5. H2 alone inflates weight but doesn't leak data; H14 alone mutates memory but requires valid signature context. Together, weight inflation provides the entry point and memory mutation propagates unauthorized state changes.\n\nChain steps:\n  1. recoverBranch: Attacker inflates weight of controlled signer in signature blob (unsigned field not in _opHash) \u2192 Inflated weight meets threshold, signature passes validation with attacker-controlled signer\n  2. recoverSapientSignature (called from recoverBranch for sapient A): Sapient A processes the signature and mutates _payload in memory \u2192 Modified parentWallets data leaks into shared memory space\n  3. recoverSapientSignature (called for sapient B in same transaction): Sapient B receives already-mutated payload from step 2 \u2192 Leaked parentWallets modifications bypass authorization in sapient B, granting unauthorized wallet operations\n\nRoot cause: Unsigned weight field in recoverBranch allows threshold manipulation, and memory mutation in recoverSapientSignature leaks modified state to subsequent calls in the same transaction\n\nComposed from: [2] Unsigned weight field in recoverBranch allows weight inflati; [14] recoverSapientSignature: memory payload mutation leaks modif",
+        "poc_code": null,
+        "execution_trace": null,
+        "skeptic_notes": "Not validated: SKEPTIC_ENABLED=false.",
+        "skeptic_status": "unverified",
+        "poc_uri": "",
+        "trace_uri": "",
+        "report_uri": "",
+        "scope_flag": "known_issue",
+        "scope_note": "Strong overlap with the project's declared known-issues section.",
+        "created_at": "2026-10-15T06:52:47.088250",
+        "validated_at": null
+      },
+      {
+        "id": "c3b3aadd-04b5-4330-b711-af2f9312ccc3",
+        "audit_id": "576d2d63-814f-4690-bdbb-4e4ecc5d374d",
+        "hypothesis_id": "45295f7b-7f9e-46ef-aee5-c7509ee53eeb",
+        "title": "Attack chain: Unsigned EIP-712 Fields + Inconsistent DelegateCall Dispatch Bypass",
+        "vulnerability_class": "Attack Chain",
+        "severity": "high",
+        "confidence": 0.7,
+        "status": "unverified",
+        "affected_functions": [
+          "execute",
+          "fromPackedCalls",
+          "hash",
+          "signatureValidation",
+          "Guest._dispatchGuest",
+          "Calls._execute",
+          "Guest.fallback"
+        ],
+        "description": "1. A user signs a batch of calls intended for Guest execution. The toEIP712() function does not include the delegateCall flag in the struct hash (H0). 2. Attacker intercepts the signed payload and flips delegateCall from false to true for one of the calls. Since delegateCall is unsigned, the signature remains valid. 3. The modified payload is submitted to execute(). Guest._dispatchGuest() checks the delegateCall flag and reverts with DelegateCallNotAllowed(i) (H16). 4. However, the execution falls through to the fallback dispatch path (Calls._execute), which DOES allow delegateCall and forwards to IDelegatedExtension.handleSequenceDelegateCall. 5. The delegatecall executes in the wallet's context, potentially modifying storage or draining funds. H0 enables the flag mutation; H16 provides the bypass path. Neither alone achieves the exploit: without H0 the flag can't be mutated, and without H16 the Guest revert would block execution entirely.\n\nChain steps:\n  1. toEIP712 / hash: Attacker flips delegateCall flag from false to true in signed payload (field not in struct hash) \u2192 Modified payload passes signature validation since delegateCall is unsigned\n  2. Guest._dispatchGuest: Execute modified payload through Guest dispatch \u2192 Guest reverts with DelegateCallNotAllowed, but execution falls through to fallback path\n  3. Calls._execute / Guest.fallback: Fallback dispatch processes the delegateCall-enabled call \u2192 DelegateCall executes attacker-controlled code in wallet proxy context, enabling storage manipulation or fund extraction\n\nRoot cause: toEIP712 omits delegateCall from signed hash, and Guest/Calls handle delegateCall inconsistently, allowing bypass via fallback dispatch path\n\nComposed from: [0] Unsigned fields in toEIP712 struct hash \u2014 delegateCall/onlyF; [16] Guest and Calls inconsistent delegateCall handling enables b",
+        "poc_code": null,
+        "execution_trace": null,
+        "skeptic_notes": "Not validated: SKEPTIC_ENABLED=false.",
+        "skeptic_status": "unverified",
+        "poc_uri": "",
+        "trace_uri": "",
+        "report_uri": "",
+        "scope_flag": "known_issue",
+        "scope_note": "Project docs list a known issue referencing `hash` \u2014 likely accepted/out of scope.",
+        "created_at": "2026-10-15T06:52:47.088254",
+        "validated_at": null
+      },
+      {
+        "id": "b9c6af29-a7ce-4135-9e7b-8adf9f271779",
+        "audit_id": "576d2d63-814f-4690-bdbb-4e4ecc5d374d",
+        "hypothesis_id": "fb114d3f-c080-4719-9435-d93570245878",
+        "title": "Attack chain: Weight Inflation + Session TOCTOU Bypasses Usage Limits",
+        "vulnerability_class": "Attack Chain",
+        "severity": "high",
+        "confidence": 0.7,
+        "status": "unverified",
+        "affected_functions": [
+          "recoverBranch",
+          "recoverSapientSignature",
+          "SessionManager.recoverSapientSignature",
+          "ExplicitSessionManager._validateExplicitCall",
+          "ExplicitSessionManager._validateLimitUsageIncrement",
+          "ExplicitSessionManager.incrementUsageLimit",
+          "PermissionValidator.validatePermission"
+        ],
+        "description": "1. Attacker targets a session-key-gated operation with usage limits (e.g., max 1 ETH transfer per session). The session requires multi-sig authorization with a specific weight threshold. 2. Attacker inflates the weight of their own signer in the branch signature blob (H2), since weight is not included in _opHash. This allows the attacker to meet the multi-sig threshold alone without other signers. 3. Attacker constructs a batched transaction containing multiple calls that each invoke session-validated operations. During signature validation, SessionManager.recoverSapientSignature() runs as a `view` function (H15). It validates usage limits against current state and computes expected increments. 4. Because the validation is view-only, the usage limit increments are not actually persisted during validation. When the batched calls execute sequentially, each call's actual state update happens after the view validation of subsequent calls. 5. The TOCTOU gap means all calls in the batch see the same pre-batch usage state during validation, allowing the attacker to exceed usage limits by the batch size multiplier. H2 provides the authorization to create the batch; H15 allows the batch to bypass limits.\n\nChain steps:\n  1. recoverBranch: Attacker inflates own signer weight to meet multi-sig threshold alone \u2192 Attacker gains authorization to create batched transactions without other signers\n  2. SessionManager.recoverSapientSignature (view): Batch of N session-limited calls submitted; view validation checks usage limits for all calls against same pre-batch state \u2192 All N calls pass validation since increments are not persisted during view-only check\n  3. ExplicitSessionManager.incrementUsageLimit (execution): Each call in batch executes and increments usage limit sequentially \u2192 Actual usage exceeds intended limit by factor of N, enabling extraction of N\u00d7 the per-session limit\n\nRoot cause: Unsigned weight in recoverBranch allows meeting threshold with fewer real signers, and SessionManager's view-only validation creates TOCTOU window for usage limit bypass across batched calls\n\nComposed from: [2] Unsigned weight field in recoverBranch allows weight inflati; [15] SessionManager view-only validation allows TOCTOU on usage l",
+        "poc_code": null,
+        "execution_trace": null,
+        "skeptic_notes": "Not validated: SKEPTIC_ENABLED=false.",
+        "skeptic_status": "unverified",
+        "poc_uri": "",
+        "trace_uri": "",
+        "report_uri": "",
+        "scope_flag": "known_issue",
+        "scope_note": "Strong overlap with the project's declared known-issues section.",
+        "created_at": "2026-10-15T06:52:47.088258",
+        "validated_at": null
+      },
+      {
+        "id": "4e1ae16d-838c-4882-95f3-b5b24c6b0f1f",
+        "audit_id": "576d2d63-814f-4690-bdbb-4e4ecc5d374d",
+        "hypothesis_id": "c1571d73-acbe-420f-a921-289caf786254",
+        "title": "Attack chain: Cross-Chain Replay + Unsigned Weight Enable Universal Wallet Takeover",
+        "vulnerability_class": "Attack Chain",
+        "severity": "high",
+        "confidence": 0.7,
+        "status": "unverified",
+        "affected_functions": [
+          "domainSeparator",
+          "recoverBranch",
+          "recoverSapientSignature"
+        ],
+        "description": "1. A legitimate multi-sig configuration update is signed on Chain A (e.g., Ethereum mainnet) using the wallet's EIP-712 signature scheme. The domain separator uses _noChainId=true, zeroing the chainId field, making it identical across all chains (H4). 2. Attacker observes this valid signature and replays it on Chain B (e.g., a testnet or L2) where the same wallet proxy exists. Since the domain separator is identical, the signature is valid on Chain B. 3. On Chain B, the attacker further modifies the signature blob by inflating the weight of a controlled signer (H2), since weight is not included in _opHash. This allows the attacker to meet any threshold with a single signer. 4. The attacker submits the replayed + weight-inflated signature on Chain B to execute a configuration change, lowering the threshold to 1-of-1 and gaining full control of the wallet on Chain B. 5. H4 enables the cross-chain replay; H2 enables post-replay threshold manipulation. Together they allow takeover on any chain where the wallet is deployed.\n\nChain steps:\n  1. domainSeparator: Attacker captures valid multi-sig signature from Chain A where _noChainId=true zeroes chainId \u2192 Signature is valid on any chain since domain separator is chain-agnostic\n  2. recoverBranch (on Chain B): Replay signature on Chain B and inflate controlled signer's weight in signature blob \u2192 Replayed signature passes validation with inflated weight meeting any threshold\n  3. execute (on Chain B): Execute configuration change to set threshold to 1-of-1 \u2192 Attacker gains full control of wallet on Chain B\n\nRoot cause: Missing chainId binding in domain separator allows cross-chain signature replay, and unsigned weight field allows post-replay threshold manipulation\n\nComposed from: [4] Cross-chain replay via _noChainId zeroing chainId in domain ; [2] Unsigned weight field in recoverBranch allows weight inflati",
+        "poc_code": null,
+        "execution_trace": null,
+        "skeptic_notes": "Not validated: SKEPTIC_ENABLED=false.",
+        "skeptic_status": "unverified",
+        "poc_uri": "",
+        "trace_uri": "",
+        "report_uri": "",
+        "scope_flag": "needs_scope_review",
+        "scope_note": "Could not map impact to an in-scope category from the description; review against the program's impacts-in-scope list.",
+        "created_at": "2026-10-15T06:52:47.088262",
+        "validated_at": null
+      }
+    ],
+    "chains": [
+      {
+        "id": "619ed267-a55a-4f04-ae7d-51d0e23db57a",
+        "audit_id": "576d2d63-814f-4690-bdbb-4e4ecc5d374d",
+        "title": "Chained Signature Checkpoint Bypass via Attacker-Controlled Checkpointer",
+        "steps": [
+          {
+            "order": 1,
+            "hypothesis_id": "663c5928-7760-402d-b524-df7e370d8fea",
+            "function": "recoverChained",
+            "action": "Craft chained signature with checkpointSize=0 in final signature flag byte",
+            "effect": "Snapshot checkpoint enforcement is completely skipped for the final signature"
+          },
+          {
+            "order": 2,
+            "hypothesis_id": "cdd2277b-81b4-409e-8d37-289ec0311f5f",
+            "function": "recover (called from recoverChained with _checkpointer=address(0))",
+            "action": "Embed malicious checkpointer address in signature data with flag bit 0x40 set",
+            "effect": "recover() reads checkpointer from attacker-controlled signature bytes instead of using a trusted address"
+          },
+          {
+            "order": 3,
+            "hypothesis_id": null,
+            "function": "recover (imageHash validation)",
+            "action": "Malicious checkpointer contract returns attacker-chosen imageHash",
+            "effect": "Authorization check passes with attacker-forged imageHash, enabling arbitrary config changes like threshold reduction to 1-of-1"
+          }
+        ],
+        "combined_severity": "critical",
+        "combined_scenario": "1. Attacker obtains a valid chained signature for a configuration update at a high checkpoint (e.g., checkpoint=100 with a high-threshold multi-sig config). 2. Attacker crafts a new chained signature where the outermost (final) signature has checkpointSize=0 in its flag byte (bits [4..2]=000), causing recoverChained to skip snapshot checkpoint enforcement entirely (H9). 3. For all non-final signatures in the chain, recoverChained passes _checkpointer=address(0) to recover(). When recover() sees _checkpointer=address(0) and flag bit 0x40 is set, it reads the checkpointer address directly FROM the attacker-controlled signature data (H10). 4. Attacker embeds a malicious checkpointer contract address in the signature bytes. This contract's imageHash() function returns whatever imageHash the attacker needs to pass validation. 5. The combined effect \u2014 bypassing checkpoint enforcement AND controlling the checkpointer \u2014 allows the attacker to forge authorization for any configuration change, including lowering the signing threshold to 1-of-1 and taking full control of the wallet. Neither H9 nor H10 alone achieves this: H9 without H10 still requires a legitimate checkpointer, and H10 without H9 is blocked by checkpoint enforcement.",
+        "root_cause": "recoverChained passes address(0) as checkpointer for non-final signatures, and checkpoint=0 skips enforcement, allowing attacker to supply arbitrary checkpointer from signature data",
+        "component_hypothesis_ids": [
+          "663c5928-7760-402d-b524-df7e370d8fea",
+          "cdd2277b-81b4-409e-8d37-289ec0311f5f"
+        ],
+        "affected_functions": [
+          "recoverChained",
+          "recover"
+        ],
+        "priority_score": 88.0
+      },
+      {
+        "id": "a3955b30-c800-43c0-9e33-41d263d8de44",
+        "audit_id": "576d2d63-814f-4690-bdbb-4e4ecc5d374d",
+        "title": "Unsigned EIP-712 Fields + Nonce Default Enable Persistent Signature Replay with DelegateCall Hijack",
+        "steps": [
+          {
+            "order": 1,
+            "hypothesis_id": "18bef9fd-3ae5-4be2-8fc8-b6693812adad",
+            "function": "fromPackedCalls",
+            "action": "Attacker modifies intercepted signed payload: sets nonceSize=0 in globalFlag and flips delegateCall to true",
+            "effect": "Nonce defaults to 0 (never consumed from payload) and delegateCall is mutated, both outside the signed hash"
+          },
+          {
+            "order": 2,
+            "hypothesis_id": "4155e1fb-79d9-4b54-ab84-757d3687524c",
+            "function": "signatureValidation",
+            "action": "Submit modified payload for validation",
+            "effect": "Signature verification passes because neither nonce nor delegateCall are included in the EIP-712 struct hash"
+          },
+          {
+            "order": 3,
+            "hypothesis_id": null,
+            "function": "execute",
+            "action": "Execute the mutated payload with delegateCall=true and nonce=0",
+            "effect": "DelegateCall executes attacker code in wallet context; nonce=0 allows indefinite replay of the same payload"
+          }
+        ],
+        "combined_severity": "critical",
+        "combined_scenario": "1. A legitimate user signs a transaction payload via the wallet's EIP-712 signature scheme. The toEIP712() function omits fields like delegateCall, onlyFallback, behaviorOnError, and gasLimit from the struct hash (H0). 2. The attacker intercepts this signed payload and modifies it: sets nonceSize=0 in the globalFlag (3-bit field), which causes fromPackedCalls to never read a nonce from the packed bytes, leaving _decoded.nonce at its Solidity default of 0 (H6). 3. The attacker also flips the delegateCall flag from false to true in the unsigned portion of the payload. Since neither the nonce nor delegateCall are covered by the signature hash, the modified payload still passes signature validation. 4. The attacker submits this payload to execute(). Because nonce is always 0, the same modified payload can be replayed indefinitely across multiple transactions. The delegateCall=true routes execution through a delegatecall path, potentially allowing the attacker to execute arbitrary code in the wallet's context. 5. H0 alone allows field mutation but nonce tracking could prevent replay; H6 alone forces nonce=0 but signed fields can't be mutated. Together they enable persistent, replayable payload mutation.",
+        "root_cause": "toEIP712 omits delegateCall/gasLimit from struct hash, and nonceSize=0 causes nonce to default to 0, together enabling replayable mutated payloads",
+        "component_hypothesis_ids": [
+          "18bef9fd-3ae5-4be2-8fc8-b6693812adad",
+          "4155e1fb-79d9-4b54-ab84-757d3687524c"
+        ],
+        "affected_functions": [
+          "execute",
+          "fromPackedCalls",
+          "hash",
+          "signatureValidation",
+          "_consumeNonce"
+        ],
+        "priority_score": 99.0
+      },
+      {
+        "id": "5b2e1533-7168-49f9-aab8-b6ae42846065",
+        "audit_id": "576d2d63-814f-4690-bdbb-4e4ecc5d374d",
+        "title": "Weight Inflation + Sapient Memory Mutation Leak Unauthorized Wallet Access",
+        "steps": [
+          {
+            "order": 1,
+            "hypothesis_id": "c60dcf89-0922-473a-825a-c379fd2c9ef8",
+            "function": "recoverBranch",
+            "action": "Attacker inflates weight of controlled signer in signature blob (unsigned field not in _opHash)",
+            "effect": "Inflated weight meets threshold, signature passes validation with attacker-controlled signer"
+          },
+          {
+            "order": 2,
+            "hypothesis_id": "a776bb74-0d63-46d2-b7fa-aa32aeb1735d",
+            "function": "recoverSapientSignature (called from recoverBranch for sapient A)",
+            "action": "Sapient A processes the signature and mutates _payload in memory",
+            "effect": "Modified parentWallets data leaks into shared memory space"
+          },
+          {
+            "order": 3,
+            "hypothesis_id": null,
+            "function": "recoverSapientSignature (called for sapient B in same transaction)",
+            "action": "Sapient B receives already-mutated payload from step 2",
+            "effect": "Leaked parentWallets modifications bypass authorization in sapient B, granting unauthorized wallet operations"
+          }
+        ],
+        "combined_severity": "high",
+        "combined_scenario": "1. Attacker observes a valid multi-sig transaction with a branch signature blob where signers have specific weights encoded in the signature (e.g., lower nibble of flag byte). The weight field is NOT included in _opHash (H2). 2. Attacker modifies the signature blob, inflating the weight of a single signer they control from 1 to a value that meets the threshold (e.g., from 1 to 10 when threshold is 10). Since weight is unsigned, recoverBranch accepts the inflated weight without invalidating the signature. 3. recoverBranch calls recoverSapientSignature on a sapient contract in the signature tree. Inside this call, the sapient contract mutates the _payload in memory (H14). The mutated payload \u2014 containing modified parentWallets data \u2014 leaks back to the caller. 4. When a second sapient contract B is processed in the same signature tree, it receives the already-mutated payload from step 3. The leaked parentWallets modifications can grant the attacker unauthorized access to parent wallet operations or bypass authorization checks in sapient B. 5. H2 alone inflates weight but doesn't leak data; H14 alone mutates memory but requires valid signature context. Together, weight inflation provides the entry point and memory mutation propagates unauthorized state changes.",
+        "root_cause": "Unsigned weight field in recoverBranch allows threshold manipulation, and memory mutation in recoverSapientSignature leaks modified state to subsequent calls in the same transaction",
+        "component_hypothesis_ids": [
+          "c60dcf89-0922-473a-825a-c379fd2c9ef8",
+          "a776bb74-0d63-46d2-b7fa-aa32aeb1735d"
+        ],
+        "affected_functions": [
+          "recoverBranch",
+          "recoverSapientSignature"
+        ],
+        "priority_score": 95.0
+      },
+      {
+        "id": "22722169-9022-4a9a-bd57-eca16b770a67",
+        "audit_id": "576d2d63-814f-4690-bdbb-4e4ecc5d374d",
+        "title": "Unsigned EIP-712 Fields + Inconsistent DelegateCall Dispatch Bypass",
+        "steps": [
+          {
+            "order": 1,
+            "hypothesis_id": "18bef9fd-3ae5-4be2-8fc8-b6693812adad",
+            "function": "toEIP712 / hash",
+            "action": "Attacker flips delegateCall flag from false to true in signed payload (field not in struct hash)",
+            "effect": "Modified payload passes signature validation since delegateCall is unsigned"
+          },
+          {
+            "order": 2,
+            "hypothesis_id": "8be1f7c6-1bf8-41ef-a6f7-f1491f1a23f5",
+            "function": "Guest._dispatchGuest",
+            "action": "Execute modified payload through Guest dispatch",
+            "effect": "Guest reverts with DelegateCallNotAllowed, but execution falls through to fallback path"
+          },
+          {
+            "order": 3,
+            "hypothesis_id": null,
+            "function": "Calls._execute / Guest.fallback",
+            "action": "Fallback dispatch processes the delegateCall-enabled call",
+            "effect": "DelegateCall executes attacker-controlled code in wallet proxy context, enabling storage manipulation or fund extraction"
+          }
+        ],
+        "combined_severity": "high",
+        "combined_scenario": "1. A user signs a batch of calls intended for Guest execution. The toEIP712() function does not include the delegateCall flag in the struct hash (H0). 2. Attacker intercepts the signed payload and flips delegateCall from false to true for one of the calls. Since delegateCall is unsigned, the signature remains valid. 3. The modified payload is submitted to execute(). Guest._dispatchGuest() checks the delegateCall flag and reverts with DelegateCallNotAllowed(i) (H16). 4. However, the execution falls through to the fallback dispatch path (Calls._execute), which DOES allow delegateCall and forwards to IDelegatedExtension.handleSequenceDelegateCall. 5. The delegatecall executes in the wallet's context, potentially modifying storage or draining funds. H0 enables the flag mutation; H16 provides the bypass path. Neither alone achieves the exploit: without H0 the flag can't be mutated, and without H16 the Guest revert would block execution entirely.",
+        "root_cause": "toEIP712 omits delegateCall from signed hash, and Guest/Calls handle delegateCall inconsistently, allowing bypass via fallback dispatch path",
+        "component_hypothesis_ids": [
+          "18bef9fd-3ae5-4be2-8fc8-b6693812adad",
+          "8be1f7c6-1bf8-41ef-a6f7-f1491f1a23f5"
+        ],
+        "affected_functions": [
+          "execute",
+          "fromPackedCalls",
+          "hash",
+          "signatureValidation",
+          "Guest._dispatchGuest",
+          "Calls._execute",
+          "Guest.fallback"
+        ],
+        "priority_score": 99.0
+      },
+      {
+        "id": "1de051ca-c396-49da-9d17-deb201afa36e",
+        "audit_id": "576d2d63-814f-4690-bdbb-4e4ecc5d374d",
+        "title": "Weight Inflation + Session TOCTOU Bypasses Usage Limits",
+        "steps": [
+          {
+            "order": 1,
+            "hypothesis_id": "c60dcf89-0922-473a-825a-c379fd2c9ef8",
+            "function": "recoverBranch",
+            "action": "Attacker inflates own signer weight to meet multi-sig threshold alone",
+            "effect": "Attacker gains authorization to create batched transactions without other signers"
+          },
+          {
+            "order": 2,
+            "hypothesis_id": "f71d8819-fe35-4f30-9d4a-fb2bb990a0e7",
+            "function": "SessionManager.recoverSapientSignature (view)",
+            "action": "Batch of N session-limited calls submitted; view validation checks usage limits for all calls against same pre-batch state",
+            "effect": "All N calls pass validation since increments are not persisted during view-only check"
+          },
+          {
+            "order": 3,
+            "hypothesis_id": null,
+            "function": "ExplicitSessionManager.incrementUsageLimit (execution)",
+            "action": "Each call in batch executes and increments usage limit sequentially",
+            "effect": "Actual usage exceeds intended limit by factor of N, enabling extraction of N\u00d7 the per-session limit"
+          }
+        ],
+        "combined_severity": "high",
+        "combined_scenario": "1. Attacker targets a session-key-gated operation with usage limits (e.g., max 1 ETH transfer per session). The session requires multi-sig authorization with a specific weight threshold. 2. Attacker inflates the weight of their own signer in the branch signature blob (H2), since weight is not included in _opHash. This allows the attacker to meet the multi-sig threshold alone without other signers. 3. Attacker constructs a batched transaction containing multiple calls that each invoke session-validated operations. During signature validation, SessionManager.recoverSapientSignature() runs as a `view` function (H15). It validates usage limits against current state and computes expected increments. 4. Because the validation is view-only, the usage limit increments are not actually persisted during validation. When the batched calls execute sequentially, each call's actual state update happens after the view validation of subsequent calls. 5. The TOCTOU gap means all calls in the batch see the same pre-batch usage state during validation, allowing the attacker to exceed usage limits by the batch size multiplier. H2 provides the authorization to create the batch; H15 allows the batch to bypass limits.",
+        "root_cause": "Unsigned weight in recoverBranch allows meeting threshold with fewer real signers, and SessionManager's view-only validation creates TOCTOU window for usage limit bypass across batched calls",
+        "component_hypothesis_ids": [
+          "c60dcf89-0922-473a-825a-c379fd2c9ef8",
+          "f71d8819-fe35-4f30-9d4a-fb2bb990a0e7"
+        ],
+        "affected_functions": [
+          "recoverBranch",
+          "recoverSapientSignature",
+          "SessionManager.recoverSapientSignature",
+          "ExplicitSessionManager._validateExplicitCall",
+          "ExplicitSessionManager._validateLimitUsageIncrement",
+          "ExplicitSessionManager.incrementUsageLimit",
+          "PermissionValidator.validatePermission"
+        ],
+        "priority_score": 95.0
+      },
+      {
+        "id": "89e1f04e-0531-4b92-845f-6fca1bfaea17",
+        "audit_id": "576d2d63-814f-4690-bdbb-4e4ecc5d374d",
+        "title": "Cross-Chain Replay + Unsigned Weight Enable Universal Wallet Takeover",
+        "steps": [
+          {
+            "order": 1,
+            "hypothesis_id": "57885a91-55ea-44ca-ab85-bc5571581c64",
+            "function": "domainSeparator",
+            "action": "Attacker captures valid multi-sig signature from Chain A where _noChainId=true zeroes chainId",
+            "effect": "Signature is valid on any chain since domain separator is chain-agnostic"
+          },
+          {
+            "order": 2,
+            "hypothesis_id": "c60dcf89-0922-473a-825a-c379fd2c9ef8",
+            "function": "recoverBranch (on Chain B)",
+            "action": "Replay signature on Chain B and inflate controlled signer's weight in signature blob",
+            "effect": "Replayed signature passes validation with inflated weight meeting any threshold"
+          },
+          {
+            "order": 3,
+            "hypothesis_id": null,
+            "function": "execute (on Chain B)",
+            "action": "Execute configuration change to set threshold to 1-of-1",
+            "effect": "Attacker gains full control of wallet on Chain B"
+          }
+        ],
+        "combined_severity": "high",
+        "combined_scenario": "1. A legitimate multi-sig configuration update is signed on Chain A (e.g., Ethereum mainnet) using the wallet's EIP-712 signature scheme. The domain separator uses _noChainId=true, zeroing the chainId field, making it identical across all chains (H4). 2. Attacker observes this valid signature and replays it on Chain B (e.g., a testnet or L2) where the same wallet proxy exists. Since the domain separator is identical, the signature is valid on Chain B. 3. On Chain B, the attacker further modifies the signature blob by inflating the weight of a controlled signer (H2), since weight is not included in _opHash. This allows the attacker to meet any threshold with a single signer. 4. The attacker submits the replayed + weight-inflated signature on Chain B to execute a configuration change, lowering the threshold to 1-of-1 and gaining full control of the wallet on Chain B. 5. H4 enables the cross-chain replay; H2 enables post-replay threshold manipulation. Together they allow takeover on any chain where the wallet is deployed.",
+        "root_cause": "Missing chainId binding in domain separator allows cross-chain signature replay, and unsigned weight field allows post-replay threshold manipulation",
+        "component_hypothesis_ids": [
+          "57885a91-55ea-44ca-ab85-bc5571581c64",
+          "c60dcf89-0922-473a-825a-c379fd2c9ef8"
+        ],
+        "affected_functions": [
+          "domainSeparator",
+          "recoverBranch",
+          "recoverSapientSignature"
+        ],
+        "priority_score": 95.0
+      }
+    ],
+    "tokens_used": 0,
+    "cost_usd": 0.0,
+    "errors": [],
+    "degraded_tools": []
+  },
+  "elapsed_s": 1143.698,
+  "usage": {
+    "calls": 74,
+    "input_tokens": 569939,
+    "output_tokens": 181817,
+    "tokens": 751756,
+    "cost_usd": 2.788477,
+    "cost_source": "provider_price_table",
+    "unpriced_models": [],
+    "by_model": {
+      "qwen/qwen3.7-max": {
+        "calls": 74,
+        "input_tokens": 569939,
+        "output_tokens": 181817,
+        "cost_usd": 2.788477,
+        "priced": true
+      }
+    }
+  }
+}

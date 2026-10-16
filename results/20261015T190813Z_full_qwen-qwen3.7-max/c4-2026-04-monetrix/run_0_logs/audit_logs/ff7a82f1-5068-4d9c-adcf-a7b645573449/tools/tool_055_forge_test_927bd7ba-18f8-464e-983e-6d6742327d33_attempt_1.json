@@ -1,0 +1,23 @@
+{
+  "run_id": "tool_055",
+  "agent": "exploit",
+  "tool_name": "forge",
+  "purpose": "test_927bd7ba-18f8-464e-983e-6d6742327d33_attempt_1",
+  "timestamp": "2026-10-15T19:57:55.779696+00:00",
+  "duration_seconds": 0.8283216953277588,
+  "command": "forge test -vv",
+  "working_dir": "",
+  "exit_code": 1,
+  "stdout": "",
+  "stderr": "Error: Compiler run failed:\nError (7576): Undeclared identifier.\n  --> test/AuditAgentPoC_927bd7ba18f8.t.sol:71:16:\n   |\n71 |         return guardian;\n   |                ^^^^^^^^\n",
+  "poc_code": "// SPDX-License-Identifier: UNLICENSED\npragma solidity ^0.8.20;\n\nimport \"forge-std/Test.sol\";\nimport \"test/simulator/SimulatorBase.sol\";\nimport \"../src/tokens/USDM.sol\";\nimport \"../src/tokens/sUSDM.sol\";\nimport \"../src/tokens/sUSDMEscrow.sol\";\nimport \"../src/core/MonetrixConfig.sol\";\nimport \"../src/core/MonetrixVault.sol\";\nimport \"../src/governance/MonetrixAccessController.sol\";\n\n// ATTACK TIMELINE:\n// 1. [Setup] User deposits USDC into vault to get USDM, then deposits USDM into sUSDM to get shares.\n// 2. [T=0] User calls sUSDM.cooldownShares() to initiate unstake, burning sUSDM and moving USDM to sUSDMEscrow.\n// 3. [T=cooldown+1] Cooldown period expires. User is now eligible to claim.\n// 4. [T=cooldown+2] Guardian pauses USDM contract due to an emergency.\n// 5. [T=cooldown+3] User attempts to call sUSDM.claimUnstake(), which calls sUSDMEscrow.release(), which calls USDM.transfer().\n// 6. [Assert] The claimUnstake transaction reverts because USDM is paused, freezing the user's funds in the escrow.\n\ncontract AuditAgentPoC is SimulatorBase {\n    function test_exploit() public {\n        address user = address(0x1234);\n        vm.deal(user, 100 ether);\n        \n        // 1. Setup: User deposits into vault to get USDM\n        _deposit(user, 10_000e6); \n        \n        sUSDM susdmToken = sUSDM(vault.susdm());\n        sUSDMEscrow escrow = sUSDMEscrow(susdmToken.escrow());\n        \n        // User deposits USDM into sUSDM to get shares\n        vm.startPrank(user);\n        usdm.approve(address(susdmToken), type(uint256).max);\n        uint256 usdmBal = usdm.balanceOf(user);\n        uint256 shares = susdmToken.deposit(usdmBal, user);\n        \n        // 2. User initiates cooldown\n        uint256 requestId = susdmToken.cooldownShares(shares);\n        vm.stopPrank();\n        \n        // 3. Warp past cooldown\n        uint256 cooldown = config.unstakeCooldown();\n        vm.warp(block.timestamp + cooldown + 1);\n        \n        // 4. Guardian pauses USDM\n        // Attempt to prank guardian. If guardian variable doesn't exist in base, \n        // we fallback to operator or acl admin.\n        address guardianAddr = address(0);\n        try this.getGuardian() returns (address g) {\n            guardianAddr = g;\n        } catch {\n            guardianAddr = operator; // Fallback\n        }\n        \n        vm.prank(guardianAddr);\n        usdm.pause();\n        \n        // 5. User tries to claim\n        vm.startPrank(user);\n        vm.expectRevert(); // Reverts due to Pausable: paused in USDM._update()\n        susdmToken.claimUnstake(requestId);\n        vm.stopPrank();\n        \n        // 6. Assert funds are frozen in escrow\n        uint256 escrowBal = usdm.balanceOf(address(escrow));\n        assertGt(escrowBal, 0, \"Funds are frozen in escrow due to USDM pause\");\n    }\n\n    function getGuardian() external view returns (address) {\n        return guardian;\n    }\n}",
+  "hypothesis_id": "927bd7ba-18f8-464e-983e-6d6742327d33",
+  "attempt_number": 1,
+  "status": "compile_error",
+  "parsed_result": {
+    "passed": false,
+    "is_compile_error": true,
+    "revert_reason": "Error: Compiler run failed:",
+    "gas_used": null
+  }
+}

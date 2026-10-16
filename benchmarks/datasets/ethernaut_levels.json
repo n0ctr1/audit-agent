@@ -1,0 +1,131 @@
+{
+  "name": "ethernaut_levels",
+  "contests": [
+    {
+      "id": "eth-fallback",
+      "name": "Ethernaut: Fallback",
+      "source_dir": "benchmarks/contracts/ethernaut/fallback",
+      "scope_file": null,
+      "docs_dir": null,
+      "split": "smoke",
+      "contest_end_date": null,
+      "contaminated": true,
+      "gt_source": null,
+      "gt_note": "Hand-written from the public OpenZeppelin Ethernaut level descriptions, not from an audit report. Solutions are public and likely in model training data: plumbing checks only, never a quality metric.",
+      "known_issues": [],
+      "official_findings": [
+        {
+          "id": "F-01",
+          "title": "Ownership transfer via fallback function with minimal ETH contribution",
+          "severity": "high",
+          "vulnerability_class": "access-control",
+          "affected_functions": [
+            "Fallback.receive()",
+            "Fallback.contribute()"
+          ],
+          "description": "The receive() fallback checks msg.value > 0 and contributions[msg.sender] > 0, then transfers ownership. An attacker first calls contribute() with 1 wei, then sends 1 wei directly to claim ownership and drain the contract."
+        }
+      ]
+    },
+    {
+      "id": "eth-fallout",
+      "name": "Ethernaut: Fallout",
+      "source_dir": "benchmarks/contracts/ethernaut/fallout",
+      "scope_file": null,
+      "docs_dir": null,
+      "split": "smoke",
+      "contest_end_date": null,
+      "contaminated": true,
+      "gt_source": null,
+      "gt_note": "Hand-written from the public OpenZeppelin Ethernaut level descriptions, not from an audit report. Solutions are public and likely in model training data: plumbing checks only, never a quality metric.",
+      "known_issues": [],
+      "official_findings": [
+        {
+          "id": "F-01",
+          "title": "Constructor typo allows anyone to become owner",
+          "severity": "critical",
+          "vulnerability_class": "access-control",
+          "affected_functions": [
+            "Fallout.Fal1out()"
+          ],
+          "description": "The contract has a function named Fal1out() (not Fallout) which was intended as the constructor. In Solidity < 0.5.0 this means it is a public function anyone can call to claim ownership. Calling Fal1out() sets owner = msg.sender."
+        }
+      ]
+    },
+    {
+      "id": "eth-coin-flip",
+      "name": "Ethernaut: Coin Flip",
+      "source_dir": "benchmarks/contracts/ethernaut/coin-flip",
+      "scope_file": null,
+      "docs_dir": null,
+      "split": "smoke",
+      "contest_end_date": null,
+      "contaminated": true,
+      "gt_source": null,
+      "gt_note": "Hand-written from the public OpenZeppelin Ethernaut level descriptions, not from an audit report. Solutions are public and likely in model training data: plumbing checks only, never a quality metric.",
+      "known_issues": [],
+      "official_findings": [
+        {
+          "id": "F-01",
+          "title": "On-chain randomness via block.number is predictable",
+          "severity": "high",
+          "vulnerability_class": "SWC-120",
+          "affected_functions": [
+            "CoinFlip.flip(bool)"
+          ],
+          "description": "The 'random' coin side is computed as block.number / FACTOR. An attacker contract can replicate this exact computation in the same block, always predicting the correct side and winning every flip."
+        }
+      ]
+    },
+    {
+      "id": "eth-telephone",
+      "name": "Ethernaut: Telephone",
+      "source_dir": "benchmarks/contracts/ethernaut/telephone",
+      "scope_file": null,
+      "docs_dir": null,
+      "split": "smoke",
+      "contest_end_date": null,
+      "contaminated": true,
+      "gt_source": null,
+      "gt_note": "Hand-written from the public OpenZeppelin Ethernaut level descriptions, not from an audit report. Solutions are public and likely in model training data: plumbing checks only, never a quality metric.",
+      "known_issues": [],
+      "official_findings": [
+        {
+          "id": "F-01",
+          "title": "tx.origin vs msg.sender confusion allows ownership theft",
+          "severity": "high",
+          "vulnerability_class": "SWC-115",
+          "affected_functions": [
+            "Telephone.changeOwner(address)"
+          ],
+          "description": "The ownership check is tx.origin != msg.sender. An attacker deploys an intermediary contract that calls changeOwner(), so tx.origin = attacker EOA while msg.sender = attacker contract. The condition is satisfied and ownership transfers to the attacker."
+        }
+      ]
+    },
+    {
+      "id": "eth-token",
+      "name": "Ethernaut: Token",
+      "source_dir": "benchmarks/contracts/ethernaut/token",
+      "scope_file": null,
+      "docs_dir": null,
+      "split": "smoke",
+      "contest_end_date": null,
+      "contaminated": true,
+      "gt_source": null,
+      "gt_note": "Hand-written from the public OpenZeppelin Ethernaut level descriptions, not from an audit report. Solutions are public and likely in model training data: plumbing checks only, never a quality metric.",
+      "known_issues": [],
+      "official_findings": [
+        {
+          "id": "F-01",
+          "title": "Integer underflow in transfer() allows minting unlimited tokens",
+          "severity": "critical",
+          "vulnerability_class": "SWC-101",
+          "affected_functions": [
+            "Token.transfer(address,uint256)"
+          ],
+          "description": "balances[msg.sender] -= _value uses unchecked arithmetic (Solidity 0.6). If _value > balances[msg.sender], the uint256 underflows to a very large number. Attacker transfers more tokens than they own, resulting in a near-max-uint256 balance."
+        }
+      ]
+    }
+  ]
+}

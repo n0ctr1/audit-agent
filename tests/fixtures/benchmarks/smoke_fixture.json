@@ -1,0 +1,36 @@
+{
+  "name": "smoke_fixture",
+  "contests": [
+    {
+      "id": "fixture-vulnerable-bank",
+      "name": "Fixture: VulnerableBank",
+      "source_dir": "tests/fixtures/contracts",
+      "scope_file": null,
+      "docs_dir": null,
+      "split": "smoke",
+      "contest_end_date": null,
+      "contaminated": true,
+      "gt_source": "tests/fixtures/contracts/VulnerableBank.sol (intentional bugs documented in the contract header)",
+      "gt_note": "Synthetic test fixture for plumbing tests only.",
+      "known_issues": [],
+      "official_findings": [
+        {
+          "id": "F-01",
+          "title": "Reentrancy in withdraw()",
+          "severity": "high",
+          "vulnerability_class": "reentrancy",
+          "affected_functions": ["VulnerableBank.withdraw"],
+          "description": "State is updated after the external call."
+        },
+        {
+          "id": "F-02",
+          "title": "No access control on emergencyDrain()",
+          "severity": "high",
+          "vulnerability_class": "access-control",
+          "affected_functions": ["VulnerableBank.emergencyDrain"],
+          "description": "Any caller can drain the vault."
+        }
+      ]
+    }
+  ]
+}

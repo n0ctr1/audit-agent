@@ -1,0 +1,121 @@
+{
+  "created_at": "2026-10-15T06:56:33.608995+00:00",
+  "dataset": {
+    "ref": "<BENCHMARK_CONTESTS_DIR>/contests.json",
+    "path": "<BENCHMARK_CONTESTS_DIR>/contests.json",
+    "sha256": "49bb9ec193ac1f3a8d52070f3160ef7b28a68d40b75a4322a626314720e302c4"
+  },
+  "selection": {
+    "split": "test",
+    "contests": [
+      "c4-2026-04-monetrix"
+    ],
+    "after_date": null,
+    "include_needs_review": true
+  },
+  "runs": 1,
+  "preset": {
+    "name": "hunter_only",
+    "env": {
+      "THREAT_MODEL_ENABLED": "true",
+      "HUNTER_EXPERTS_ENABLED": "true",
+      "HUNTER_STANDALONE_PASSES_ENABLED": "true",
+      "EXPLOIT_ENABLED": "false",
+      "SKEPTIC_ENABLED": "false",
+      "REFUTER_ENABLED": "false"
+    }
+  },
+  "fuzz": true,
+  "git": {
+    "commit": "7045a7b034dc6440515b622aa42dec092b9e4b5f",
+    "dirty": false
+  },
+  "python": "3.12.14",
+  "models": {
+    "scout": "qwen/qwen3.7-max",
+    "mapper": "qwen/qwen3.7-max",
+    "hunter": "qwen/qwen3.7-max",
+    "exploit": "qwen/qwen3.7-max",
+    "skeptic": "qwen/qwen3.7-max",
+    "scribe": "qwen/qwen3.7-max",
+    "baseline": "qwen/qwen3.7-max",
+    "triage": "qwen/qwen3.7-max"
+  },
+  "flags": {
+    "HUNTER_NAVIGATOR_ENABLED": true,
+    "HUNTER_EXPERTS_ENABLED": true,
+    "HUNTER_STANDALONE_PASSES_ENABLED": true,
+    "EXPLOIT_ENABLED": false,
+    "SKEPTIC_ENABLED": false,
+    "INVARIANT_PROVER_ENABLED": true,
+    "REFUTER_ENABLED": false,
+    "CHAINER_ENABLED": true,
+    "THREAT_MODEL_ENABLED": true,
+    "TRIAGE_ENABLED": true,
+    "ADERYN_ENABLED": true,
+    "SEMGREP_ENABLED": true,
+    "AUDIT_LOG_ENABLED": true
+  },
+  "settings": {
+    "llm_provider": "openai_compatible",
+    "llm_disable_thinking": false,
+    "llm_reasoning_max_tokens": 2048,
+    "llm_min_output_tokens": 32768,
+    "tool_mode": "strict",
+    "hunter_max_concurrency": 3,
+    "hunter_top_functions": 8,
+    "hunter_max_hypotheses": 40,
+    "hunter_source_budget_chars": 80000,
+    "hunter_context_budget_chars": 40000,
+    "hunter_navigator_leads": 2,
+    "hunter_navigator_max_steps": 6,
+    "chainer_max_chains": 6,
+    "hunter_threat_boost": 15.0,
+    "triage_batch_size": 25,
+    "triage_weight": 20.0,
+    "default_budget_tokens": 500000,
+    "default_budget_usd": 50.0,
+    "baseline_max_tokens": 2000000,
+    "baseline_max_seconds": 5400,
+    "baseline_max_steps": 150,
+    "baseline_command_timeout": 120
+  },
+  "contests": [
+    {
+      "id": "c4-2026-04-monetrix",
+      "name": "Code4rena 2026-04 Monetrix",
+      "source_dir": "work/2026-04-monetrix",
+      "scope_file": "scope.txt",
+      "docs_dir": null,
+      "split": "test",
+      "contest_end_date": "2026-05-04",
+      "contaminated": false,
+      "gt_source": "https://code4rena.com/reports/2026-04-monetrix",
+      "gt_note": null,
+      "needs_review": true,
+      "known_issues": [],
+      "official_findings": [
+        {
+          "id": "M-01",
+          "title": "PM borrow liabilities are omitted from backing, allowing phantom surplus settlement",
+          "severity": "medium",
+          "vulnerability_class": "unclassified",
+          "affected_functions": [
+            "PrecompileReader.suppliedBalance",
+            "PrecompileReader.suppliedUsdcEvm",
+            "PrecompileReader.suppliedNotionalUsdcFromPerp",
+            "MonetrixAccountant._readL1Backing",
+            "MonetrixAccountant.surplus",
+            "MonetrixAccountant.distributableSurplus",
+            "MonetrixAccountant.settleDailyPnL",
+            "MonetrixVault.distributeYield",
+            "MonetrixConfig.initialize",
+            "MonetrixVault.deposit",
+            "sUSDM.cooldownShares"
+          ],
+          "description": "Submitted by 0xastronatey, also found by 0x04, ABAIKUNANBAEV, aestheticbhai, ahmad044, botdidy, bunnyhunter, cgdusek, ChainSentry, cheng9061, ciphermalware, CircuitBreaker, Diavolo, Drothon, edoscoba, fuddle_yichi, gwumex, harry, HUNTERRRRRRR, I1iveF0rTh1Sh1t, Jing, KuwaTakushi, legat, Link1337, Luc1jan, lufP, n0rv, niffylord, oreztker, qed, rajatbeladiya, Riceee, sgtpepper, unineko, WhiteKnightK, winor30, and ZakMHTX - src/core/PrecompileReader.sol L84-L91 - src/core/PrecompileReader.sol L133-L136 - src/core/PrecompileReader.sol L152-L162 - src/core/MonetrixAccountant.sol L146-L157 - src/core/MonetrixAccountant.sol L180-L192 Summary MonetrixAccountant._readL1Backing() adds Portfolio Margin / Borrow-Lend supplied balances to backing via PrecompileReader.suppliedBalance(), but the 0x811 pre"
+        }
+      ]
+    }
+  ]
+}

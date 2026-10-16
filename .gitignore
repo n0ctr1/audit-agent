@@ -1,0 +1,69 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+*.egg
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Pytest
+.pytest_cache/
+.coverage
+htmlcov/
+*.coveragerc
+
+# MyPy / Pyright
+.mypy_cache/
+.pyright/
+
+# Ruff
+.ruff_cache/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+docker-compose.override.yml
+
+# MinIO / artifact storage
+artifacts/
+
+# Logs
+*.log
+logs/
+audit-reports/
+
+# Audit / benchmark outputs (may contain findings — never commit)
+audit_logs/
+results/
+.slither_analysis.json
+slither_output.json
+
+# Foundry build output and dependencies of fixture projects
+test-contracts/**/out/
+test-contracts/**/cache/
+test-contracts/**/lib/
+test-contracts/out/
+test-contracts/cache/
+test-contracts/lib/
